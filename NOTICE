@@ -1,13 +1,25 @@
-NOTICE -- licensing of the PANDORA artifact
-=============================================
+NOTICE -- licensing of PANDORA
+==============================
 
-This archive bundles several independently-licensed components. Each component keeps its own
-license; this file is an index, not a grant. Files with a ".STAMP" suffix at the top level
-(AUTHORS.STAMP, VERSIONS.STAMP, LICENSE.STAMP) are inherited verbatim from upstream STAMP and
-describe STAMP, not this submission.
+PANDORA's own code is licensed under the BSD-3-Clause-Clear license (the Clear BSD License,
+`LICENSE`). This repository also bundles independently licensed third-party components, listed
+below; each keeps its own license, which `LICENSE` does not replace. Files with a ".STAMP"
+suffix at the top level (AUTHORS.STAMP, VERSIONS.STAMP, LICENSE.STAMP) are inherited verbatim
+from upstream STAMP and describe STAMP.
 
-PANDORA / STAMP
----------------
+PANDORA (BSD-3-Clause-Clear, `LICENSE`)
+---------------------------------------
+Our changes and additions in:
+  - the workloads: genome/ intruder/ kmeans/ labyrinth/ ssca2/ vacation/ yada/ (and bayes/)
+  - lib/ common/ backends/       shared harness, TM macro layer, per-runtime back-ends
+  - ae/ scripts/ docker/ Logs/   build, run and plotting scripts
+  - data/ diffs/ inputs/kmeans/generate3.py, and the documentation
+The workloads and lib/ are derived from STAMP; STAMP's own code in them remains under STAMP's
+license (below), whose notices must be retained. The patches in ae/stampede/ and diffs/ modify
+third-party code and are offered under the terms of the code they modify.
+
+STAMP
+-----
 PANDORA is derived from STAMP (Stanford Transactional Applications for Multi-Processing),
 distributed under a BSD-style license.
   - LICENSE.STAMP   STAMP's license index (points to per-component notices below)
@@ -34,8 +46,11 @@ User-level threading
   - ULT/fibre/      pthread-to-libfibre wrapper, derived from MassiveThreads' pthread wrapper;
                     BSD-style (ULT/fibre/LICENSE.MassiveThreads, ULT/fibre/README.md)
 
-Because libfibre is licensed under GPLv3, redistribution of this archive as a whole is subject
-to the terms of the GPLv3. Modifications made for this work are documented under diffs/.
+libfibre is the only component licensed solely under the GPL (TinySTM may be used under
+the MIT license). Binaries linked with libfibre (the default build, `USE_ULT` in
+common/env.mk) are combined works subject to the GPLv3 when distributed; the source files of
+the other components, including PANDORA's, keep their own licenses. PANDORA also builds without
+libfibre (comment out `USE_ULT`). Modifications made for this work are documented under diffs/.
 
 Memory allocator
 ----------------

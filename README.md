@@ -371,7 +371,8 @@ NOTICE               licensing index
 
 ## Licensing
 
-See `LICENSE` (GPLv3) and `NOTICE`. PANDORA derives from STAMP (BSD-style). Bundled runtimes
-keep their own licenses; libfibre is GPLv3, so redistribution of the tree as a whole is
-subject to the GPLv3. Stampede and Galois 2.2.1 are third-party code under their own terms
+PANDORA's own code is licensed under the BSD-3-Clause-Clear license (`LICENSE`). It derives
+from STAMP (BSD-style), whose notices are kept. Bundled third-party components keep their own
+licenses, listed in `NOTICE`; libfibre, the user-level threads PANDORA runs on by default, is
+GPLv3, which applies to binaries linked with it. Stampede and Galois 2.2.1 are third-party code under their own terms
 and are not included; `ae/stampede/fetch.sh` downloads them and applies our patches.

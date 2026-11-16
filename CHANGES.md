@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-- Public repository: added `LICENSE` (GPLv3), `CITATION.cff` and `.zenodo.json`; releases are
+- License: PANDORA's own code is now under the BSD-3-Clause-Clear license (`LICENSE`); bundled
+  third-party components keep their own licenses (`NOTICE`). Version 1.0 was released under the
+  GPL-3.0-or-later.
+- Public repository: added `LICENSE`, `CITATION.cff` and `.zenodo.json`; releases are
   archived on Zenodo as new versions of 10.5281/zenodo.23908116.
 - README reorganized for general use; the quick start now runs `ae/stampede/fetch.sh` before
   building, since the Stampede baseline is not included.

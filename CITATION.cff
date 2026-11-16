@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use PANDORA, please cite the paper below."
 title: "PANDORA: A Transactional Memory Benchmark Suite"
 type: software
-license: GPL-3.0-or-later
+license: BSD-3-Clause-Clear
 repository-code: "https://github.com/tsumulab/pandora"
 keywords:
   - transactional memory
