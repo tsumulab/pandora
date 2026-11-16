@@ -27,7 +27,7 @@
       "orcid": "0000-0003-2004-5284"
     }
   ],
-  "license": "GPL-3.0-or-later",
+  "license": "gpl-3.0-or-later",
   "keywords": [
     "transactional memory",
     "benchmark",
@@ -36,13 +36,8 @@
     "hardware transactional memory",
     "user-level threads"
   ],
-  "description": "<p>PANDORA is a STAMP-derived transactional-memory benchmark suite whose workloads leave conflict detection, version management and transaction scheduling to the TM runtime. This record is a release of the development repository https://github.com/tsumulab/pandora. The version evaluated in the PPoPP 2027 artifact evaluation is https://doi.org/10.5281/zenodo.23908117.</p>",
+  "description": "<p>PANDORA is a STAMP-derived transactional-memory benchmark suite whose workloads leave conflict detection, version management and transaction scheduling to the TM runtime. Versions from v1.1 on are releases of the development repository https://github.com/tsumulab/pandora; version 1.0 (https://doi.org/10.5281/zenodo.23908117) is the one evaluated in the PPoPP 2027 artifact evaluation.</p>",
   "related_identifiers": [
-    {
-      "identifier": "10.5281/zenodo.23908117",
-      "relation": "isNewVersionOf",
-      "scheme": "doi"
-    },
     {
       "identifier": "https://github.com/tsumulab/pandora",
       "relation": "isSupplementTo",

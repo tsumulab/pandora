@@ -1,0 +1,41 @@
+# Archive every published GitHub release as a new version of the existing
+# Zenodo record (concept DOI 10.5281/zenodo.23908116), so that the concept DOI
+# printed in the paper always resolves to the latest release.
+#
+# Requires the repository secret ZENODO_TOKEN: a Zenodo personal access token
+# with the deposit:write and deposit:actions scopes.
+# Do NOT also enable Zenodo's own GitHub integration for this repository, or
+# each release will be archived twice (the second time under a new concept DOI).
+name: Zenodo release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  zenodo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the release archive
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          name="pandora-${TAG#v}"
+          git archive --format=tar.gz --prefix="${name}/" -o "${name}.tar.gz" "${TAG}"
+          echo "archive=${name}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Publish a new version on Zenodo
+        # rseng/zenodo-release has no tagged releases; pin the reviewed commit.
+        uses: rseng/zenodo-release@a9c88701a0176df755015f8ca4cf8cc754162f27
+        with:
+          token: ${{ secrets.ZENODO_TOKEN }}
+          version: ${{ github.event.release.tag_name }}
+          zenodo_json: .zenodo.json
+          html_url: ${{ github.event.release.html_url }}
+          archive: ${{ env.archive }}
+          doi: '10.5281/zenodo.23908116'
