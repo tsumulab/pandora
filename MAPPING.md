@@ -8,7 +8,7 @@ figure or table, and where the paper's own numbers are.
 
 | Item | Paper | Artifact |
 |---|---|---|
-| CPU | Intel Xeon Platinum 8380 (Ice Lake), 1 socket, 40 cores, 2.30 GHz; HT off, Turbo off | reviewer's machine |
+| CPU | Intel Xeon Platinum 8380 (Ice Lake), 1 socket, 40 cores, 2.30 GHz; HT off, Turbo off | your machine |
 | Memory / caches | 64 GB; L1D 1.9 MiB / L2 50 MiB / L3 60 MiB | -- |
 | OS / compiler | Ubuntu 20.04, gcc/g++ 9.4.0, `-O2` | `docker/Dockerfile` (same) |
 | Allocator | TCMalloc | same (`common/env.mk`) |
@@ -50,7 +50,7 @@ evaluation (Sec. 6.4; Sec. 5 footnote 1).
 |---|---|---|---|
 | Table 1 | STM design properties | descriptive (`backends/*/tm.h`, runtime sources) | -- |
 | Tables 2-3 | platform / execution environment | Sec. 1 above | -- |
-| Table 4 | #Tx, \|R\|/\|W\|, Tx time, aborts STAMP->PANDORA (TinySTM @ 40 cores) | E3 | `data/table4.csv` (camera-ready) |
+| Table 4 | #Tx, \|R\|/\|W\|, Tx time, aborts STAMP->PANDORA (TinySTM @ 40 cores) | E3 | `data/table4.csv` |
 | Table 4 | LOC ratio (fine/TM) | E4 | `data/loc.csv` |
 | Fig. 1 | division-of-labor diagram | conceptual | -- |
 | Figs. 2-4 | speedup: genome, kmeans_high, ssca2 | E1 | `data/speedup.csv` (`S1(=Fig2)`, `S2(=Fig3)`, `S4(=Fig4)`) |
@@ -60,7 +60,7 @@ evaluation (Sec. 6.4; Sec. 5 footnote 1).
 | Fig. S12 | switch/non-switch, TinySTM, all configurations | E2-full | `data/speedup.csv` |
 
 `ae/paper_figures.py` draws Figs. 2-5 and S1-S12 in the paper's layout, from
-`data/speedup.csv` (`--paper-csv`) or from a reviewer's `results/summary.csv`.
+`data/speedup.csv` (`--paper-csv`) or from your `results/summary.csv`.
 `ae/plot.py` draws each measured panel together with the paper's curve from
 `data/speedup.csv`. See `data/README.md` for that file's schema.
 

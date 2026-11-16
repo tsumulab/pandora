@@ -1,24 +1,17 @@
 # data/ -- figure-source data
 
 These are the numbers behind the paper's figures and Table 4, tidied from the authors' Excel
-workbook. The values are the **exact numbers plotted in the figures** (submitted version; genome: camera-ready, see below) -- they were
-extracted programmatically from the workbook's embedded charts, not obtained from a fresh run.
-The data is provided as plain CSV; `ae/plot.py` draws it next to a reviewer's measurements.
+workbook: the **exact numbers plotted in the figures**, extracted programmatically from the
+workbook's embedded charts, not obtained from a fresh run. They are plain CSV; `ae/plot.py`
+draws them next to your own measurements.
 
-**genome (camera-ready).** All PANDORA genome points (PANDORA/TM on all five TM systems with
-switching, TinySTM without switching, and both lock versions) were re-measured after the
-barrier correction described in the top-level README (Sec. 5) and replaced here: means of the
-re-measured runs, divided by the unchanged sequential-STAMP time of 6.100509 s. The
-STAMP/TM and Stampede/TM genome points are unaffected by the correction and unchanged.
-
-**TinySTM (camera-ready).** All TinySTM `PANDORA/TM` (switch on and off) and `STAMP/TM`
-points, and every TinySTM value of Table 4, were re-measured with this artifact's build
-(original TinySTM 1.0.5; `backends/tinystm/tm.h` with explicit-descriptor pointer accesses,
-see the top-level README; the TCMalloc of `allocator/`, as for all other curves), 5 runs per point, and divided by the paper's sequential-STAMP
-times (genome 6.100509 s, intruder 13.695798, kmeans_high 57.7789, kmeans_low 474.261,
-labyrinth 34.576321, ssca2 3.4235614, vacation_high 15.206107, vacation_low 11.56033,
-yada 6.1). The submitted version's abort counts had come from a TinySTM build with extra
-global commit/abort counters (`STATIC_ID`), which lowered them.
+All genome points and all TinySTM points (`PANDORA/TM` with switching on and off,
+`STAMP/TM`, and every TinySTM value of Table 4) were measured with the code in this
+repository: original TinySTM 1.0.5, `backends/tinystm/tm.h` with explicit-descriptor pointer
+accesses, and the TCMalloc of `allocator/` (as for all other curves); 5 runs per point. Speedups
+are over the sequential-STAMP times used throughout the paper (genome 6.100509 s, intruder
+13.695798, kmeans_high 57.7789, kmeans_low 474.261, labyrinth 34.576321, ssca2 3.4235614,
+vacation_high 15.206107, vacation_low 11.56033, yada 6.1).
 
 ## Files
 
@@ -77,9 +70,8 @@ Series from the switch-comparison and other charts in the workbook, kept with th
 labels and **not** auto-classified. This includes the material behind Figure 5 and S10-S12 as
 well as some charts not used in the paper. Columns: `chart`, `chart_title`, `series_label`,
 `cores`, `value`. The TinySTM series of these charts (PANDORA switch/non-switch and STAMP; 288
-points) were updated with the camera-ready re-measurement: each point is scaled by the ratio of
-the new to the old value of the same point in `speedup.csv`, which keeps each chart's own
-normalisation (some charts differ from `speedup.csv` by up to +/-13%).
+points) follow the TinySTM measurements of `speedup.csv`: each point is scaled by the ratio of
+the two measurements of the same point, which keeps each chart's own normalisation (some charts differ from `speedup.csv` by up to +/-13%).
 
 ## `LOC` (Table 4, LOC ratio)
 
@@ -93,13 +85,13 @@ recomputes these from source.
 
 ## Reproducing
 
-A reviewer can regenerate the underlying numbers with `scripts/msr.sh` + `Logs/summarize.sh`
+You can regenerate the underlying numbers with `scripts/msr.sh` + `Logs/summarize.sh`
 (see `../MAPPING.md` Sec. 4); the resulting curves match these figures. Exact values will differ
 slightly run to run, as is normal.
 
 ## `table4.csv` (Table 4)
 
-The camera-ready values of Table 4, one row per configuration: `tx_count` (#Tx), `read_set` /
+The values of Table 4, one row per configuration: `tx_count` (#Tx), `read_set` /
 `write_set` (mean |R| / |W| per committed transaction), `tx_time_pct` (share of aggregate core
 time spent in transactions), `aborts_stamp` -> `aborts_pandora`, and `loc_ratio_fine_tm` (empty
 for yada), plus `aborts_pandora_noswitch` (the same instrumented build with switching off,

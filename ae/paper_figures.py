@@ -24,7 +24,7 @@ Output: <out>/speedup_<config>.<fmt>   Figs. 2-4 and S1-S9 (five TM panels)
                                        switch vs non-switch on all five TM systems)
         <out>/legend_speedup.<fmt>     the shared legend on its own
 
-The look reproduces the Excel/Illustrator figures of the submitted paper:
+The look reproduces the Excel/Illustrator figures of the paper:
 same series, colours, markers, dash patterns, panel order, horizontal grid
 only, and Excel-like automatic y scaling (override with --ymax).
 Requires matplotlib (installed in the Docker image).
@@ -38,7 +38,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
 # --------------------------------------------------------------------------
-# Style (taken from the submitted figures)
+# Style (taken from the paper's figures)
 # --------------------------------------------------------------------------
 FONT = ["Arial", "Liberation Sans", "Helvetica", "DejaVu Sans"]
 FS_TICK, FS_TITLE, FS_LEGEND = 8, 9, 8
