@@ -1,84 +1,48 @@
 # PANDORA
 
-A transactional-memory benchmark suite, and the artifact for the PPoPP 2027 paper
-*"Measuring Transactional Memory: PANDORA and the Division of Labor."*
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23908116.svg)](https://doi.org/10.5281/zenodo.23908116)
 
-PANDORA is a STAMP-derived benchmark suite whose workloads were redesigned so that
-conflict detection, version management, and transaction scheduling are left to the
-TM runtime rather than to the application. This artifact contains PANDORA, the two
-baselines it is compared with (STAMP and Stampede), every TM runtime and lock
-version used in the paper, and scripts that rebuild every binary, rerun every
-measurement, and redraw every speedup figure next to the paper's own curves.
+PANDORA is a transactional-memory (TM) benchmark suite derived from STAMP. Its workloads
+were redesigned so that conflict detection, version management, and transaction scheduling
+are left to the TM runtime rather than to the application, so that what it measures is the
+runtime, not how the benchmark was programmed around it.
 
-**Versions.** This repository is where PANDORA continues to be developed. The version
-evaluated in the paper's artifact evaluation is archived at Zenodo:
-https://doi.org/10.5281/zenodo.23908117. Like that archive, this repository does not contain
-the Stampede/Galois baseline, whose license does not permit redistribution; it ships our
-patches instead, and `ae/stampede/fetch.sh` downloads the upstream sources and applies them.
+This repository contains the seven PANDORA workloads (nine configurations), their
+productivity-matched fine- and coarse-grained lock versions, back-ends for four STM runtimes
+(TL2, TinySTM, NOrec, SwissTM) and Intel TSX, the libfibre user-level threads PANDORA runs
+on, the STAMP and Stampede baselines, and scripts that build everything, run the
+measurements, and draw the figures of the paper.
 
-**Badges requested:** Artifacts Evaluated -- Reusable, Results Reproduced, Artifacts Available.
+PANDORA is described in
 
-**Paper version.** The PDF submitted with this artifact is the camera-ready draft. Changes
-relevant to the artifact since submission (details in Sec. 5):
-- genome: a missing barrier was restored; all genome numbers were re-measured.
-- TinySTM: every TinySTM number (PANDORA with and without switching, STAMP/TM, Table 4,
-  the abort counts and profiles of Sec. 6.2) was re-measured with the stock TinySTM 1.0.5
-  shipped here; the submitted version had used a build with extra global counters.
-- The TCMalloc used throughout (gperftools 2.13 with one tuning change) is now stated in
-  Table 3 and shipped in `allocator/`.
-The conclusions did not change. `data/` holds the numbers of the camera-ready draft.
+> Hiroki Sato, Toru Koizumi, Ryota Shioya, Masahiro Goshima, and Tomoaki Tsumura.
+> *Measuring Transactional Memory: PANDORA and the Division of Labor.*
+> PPoPP 2027.
+
+If you use PANDORA, please cite the paper (see `CITATION.cff`).
+
+**Versions.** Releases of this repository are archived on Zenodo under
+[10.5281/zenodo.23908116](https://doi.org/10.5281/zenodo.23908116), which always resolves to
+the latest release. Version 1.0 ([10.5281/zenodo.23908117](https://doi.org/10.5281/zenodo.23908117))
+is the one evaluated in the paper's artifact evaluation. See `CHANGES.md` for what changed.
+
+**Stampede.** The Stampede baseline (Stampede, its bundled Galois 2.2.1 and TinySTM 1.0.4) may
+not be redistributed, so this repository ships only our patches to it.
+`ae/stampede/fetch.sh` downloads the upstream sources, checks their checksums, and applies the
+patches; run it once before building (Quick start, step 1).
 
 | | |
 |---|---|
-| Getting Started | ~10 min wall clock on our 40-core machine: ~4 min `docker build`, ~5 min build + smoke test (Sec. 2) |
-| Key experiments E1, E2, E3, E4 | ~1.5 h on a 40-core machine (Sec. 3) |
-| All experiments (`ae/run_all.sh`) | ~14 h on a 40-core machine, mostly E1-full; suited to an overnight run |
-| Hardware | x86-64 Linux; the paper's results use 40 cores, >= 8 cores recommended; Intel TSX only for the HTM results (Sec. 4) |
-| Software | Docker (or Podman/Apptainer) on a native x86-64 Linux host; network access for `docker build`. Everything else is inside the image. Also runs without containers on Ubuntu 20.04-24.04 (Sec. 2). Not supported: Docker Desktop on macOS or Windows |
+| Hardware | x86-64 Linux; the paper uses 40 cores, >= 8 cores recommended; Intel TSX only for the HTM results |
+| Software | Docker (or Podman/Apptainer) on a native x86-64 Linux host, or Ubuntu 20.04-24.04 without containers. Not supported: Docker Desktop on macOS or Windows |
 | Disk | ~3 GB including the image |
+| Time | ~10 min to build and smoke-test; ~1.5 h for the key experiments on 40 cores; ~14 h for all |
 
 ---
 
-## 1. What is in the archive
+## Quick start
 
-```
-README.md            this file
-docker/Dockerfile    build/run environment (Ubuntu 20.04, gcc 9.4 -- the paper's toolchain)
-ae/                  artifact-evaluation scripts (start here)
-  kick_the_tires.sh    build + small-input smoke test of all nine configurations
-  experiments.sh       E1-E5 (Sec. 3)
-  run_all.sh           E1 ... E4 back to back, unattended, with timings (Sec. 3)
-  build_all.sh         build every binary of every series (~5 min)
-  run.sh               run any series x configuration x core count x repetitions
-  collect.py           raw logs -> results/runs.csv, results/summary.csv
-  plot.py              summary -> results/figures/*.png, overlaid on the paper's curves
-  paper_figures.py     the paper's figures, in the paper's layout, from data/ or from your runs
-  prepare_inputs.sh    create/verify the large inputs (done automatically on first use)
-  clean.sh             remove build products (--dist: back to the shipped state)
-  profile.sh           optional perf profiles of Sec. 6.2 (host only)
-  common.sh            single source of truth: workload arguments and series definitions
-  stampede/            fetch.sh: rebuild orig/stampede from upstream + our patches
-<workload>/          PANDORA workloads: genome intruder kmeans labyrinth ssca2 vacation yada
-lib/ common/         shared harness (threads, libfibre integration, TM macro layer)
-backends/            per-backend tm.h + Makefile (TM runtimes, locks, sequential)
-tinySTM-1.0.5/ tl2/ norec/ swisstm/   STM runtimes
-ULT/libfibre/        user-level threads (libfibre, GPLv3)
-allocator/           the TCMalloc used by PANDORA and STAMP: gperftools 2.13 + one-line patch
-orig/switch-stamp/   STAMP baseline: STAMP/TM and sequential STAMP (the speedup denominator)
-orig/stampede/       Stampede baseline (Nguyen & Pingali, ASPLOS'17): Stampede/TM
-inputs/              all inputs, shared by PANDORA, STAMP and Stampede
-scripts/             original build/run/LOC scripts (used by ae/)
-data/                the exact numbers plotted in the paper (speedup.csv, loc.csv, ...)
-diffs/               STAMP -> PANDORA source diffs, per workload (paper Sec. 5, appendix Sec. A)
-MAPPING.md           paper figure/table -> experiment -> output file
-NOTICE               licensing index
-```
-
----
-
-## 2. Getting Started (kick the tires)
-
-**Host.** Run on a native x86-64 Linux host and unpack the archive there: the tree contains
+**Host.** Run on a native x86-64 Linux host and clone or unpack the tree there: the tree contains
 file names that differ only in case (e.g. `ULT/libfibre/src/libfibre/{Fibre.h,fibre.h}`),
 which a case-insensitive file system (the default on macOS and Windows) silently merges, and
 Docker Desktop's virtual machine (or x86 emulation on Arm Macs) distorts the timings the
@@ -86,17 +50,25 @@ claims are about. The container uses the host kernel; any recent kernel works. F
 results the host CPU and kernel must also expose Intel TSX (`rtm` in `/proc/cpuinfo`).
 
 ```bash
-# 0. unpack on a Linux host, then from the archive root (~4 min; downloads Ubuntu 20.04 packages):
+# 0. clone (or unpack a release), then from the repository root (~4 min):
 docker build -t pandora-ae docker/
 
-# 1. start a container with the archive mounted at /pandora, running as yourself so
-#    that everything it writes into the archive stays yours
+# 1. download and patch the Stampede baseline into orig/stampede (needs network; once)
+ae/stampede/fetch.sh
+
+# 2. start a container with the tree mounted at /pandora, running as yourself so that
+#    everything it writes stays yours
 docker run --rm -it --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD":/pandora pandora-ae bash
 
-# 2. inside the container, in /pandora: build everything and run all nine
+# 3. inside the container, in /pandora: build everything and run all nine
 #    configurations on small inputs (~5 min)
 ae/kick_the_tires.sh
 ```
+
+Step 1 needs `git`, `curl` and `patch` on the host; alternatively run it inside the
+container (`docker run ... pandora-ae ae/stampede/fetch.sh`). `ae/kick_the_tires.sh` and a
+plain `ae/build_all.sh` expect the Stampede baseline. Without it, build only what you need
+(`ae/build_all.sh --only pandora`, `--only stamp`) and run it with `ae/run.sh`.
 
 Expected: the build prints `ok` for every component, and the output ends with
 
@@ -123,14 +95,39 @@ above either way: without it the container runs as root and the files it writes 
   and `apptainer exec --bind "$PWD":/pandora --pwd /pandora pandora-ae.sif ae/kick_the_tires.sh`.
 - *Natively*: install the packages of `docker/Dockerfile`, e.g. on Ubuntu
   `sudo apt-get install build-essential cmake libboost-dev libnuma-dev unifdef cloc python3-matplotlib fonts-liberation bc gdb git curl patch`,
-  then run the same `ae/` commands from the archive root on the host. We checked this on
+  then run the same `ae/` commands from the repository root on the host. We checked this on
   Ubuntu 24.04 with gcc 13.3: every binary builds, and `kick_the_tires.sh` and a small-input
   run of every series pass. The paper's numbers were measured with gcc 9.4 (the image);
   another compiler can shift absolute timings, not the claims' shape.
 
 ---
 
-## 3. Step-by-step instructions
+## Using PANDORA
+
+- **Other core counts / repetitions:** `CORES=... REPS=...` (see Running the experiments), or `ae/run.sh` directly.
+- **Another TM runtime:** add `backends/<name>/{tm.h,Makefile}` (start from
+  `backends/tinystm` and map the `TM_*` macros to your runtime), add `<name>` to `STMS` in
+  `ae/common.sh`, and rebuild with `ae/build_all.sh`. The workloads need no change: keeping
+  conflict detection, version management and scheduling below the `TM_*` interface is the
+  point of the suite (Sec. 4, Sec. 5.1).
+- **Other inputs:** every configuration's arguments are in `args_of` in `ae/common.sh`
+  (`large` = the paper's, `small` = smoke-test inputs).
+- **Without libfibre** (non-x86/Arm): comment out `USE_ULT` in `common/env.mk`.
+- **Programming-effort analysis of new code:** `scripts/run_cloc_analysis.sh <backend> <workload>`.
+
+
+The workloads talk to the TM runtime only through the `TM_*` macros of `lib/tm.h`, which each
+back-end in `backends/` defines; `backends/tinystm/tm.h` is the reference.
+
+---
+
+## Reproducing the paper
+
+Section, figure and table numbers below refer to the PPoPP 2027 paper. `data/` holds the
+numbers plotted in the paper, and `MAPPING.md` lists which experiment produces which figure
+or table.
+
+### Running the experiments
 
 All commands run inside the container from `/pandora`. Each experiment writes raw logs
 under `results/raw/`, then refreshes `results/summary.csv` and `results/figures/`.
@@ -138,8 +135,7 @@ Experiments can be interrupted and re-run; finished runs are kept.
 The large kmeans and yada inputs are generated and checksum-verified on first use (~1 min).
 
 By default every experiment uses **core counts 1, N/2 and N** (N = cores of the machine,
-capped at 40, the paper's maximum) and **3 repetitions** (the paper uses the mean of at
-least 5 runs at 1, 2, 4, 8, 12, ..., 40 cores). Both can be changed:
+capped at 40, the paper's maximum) and **3 repetitions** (the paper uses the mean of 5 runs at 1, 2, 4, 8, 12, ..., 40 cores). Both can be changed:
 
 ```bash
 CORES="1 2 4 8 12 16 20 24 28 32 36 40" REPS=5 ae/experiments.sh E1   # the paper's sweep
@@ -202,14 +198,14 @@ followed by `python3 ae/collect.py && python3 ae/plot.py`.
 
 ---
 
-## 4. Claims
+### Claims
 
-Section and table numbers refer to the camera-ready paper. Absolute speedups depend on
-the evaluation machine (ours: single-socket Xeon Platinum 8380, 40 cores, HT and Turbo
-off; Table 2); what should be reproduced is the shape and ordering of the curves and the
-order of magnitude of the counts. On a machine with fewer cores, compare at its maximum.
+Absolute speedups depend on the machine (ours: single-socket Xeon Platinum 8380, 40 cores,
+HT and Turbo off; Table 2); what should be reproduced is the shape and ordering of the
+curves and the order of magnitude of the counts. On a machine with fewer cores, compare at
+its maximum.
 
-**Supported by the artifact.**
+**Reproducible with the scripts.**
 
 - **C1 -- PANDORA measures runtime costs that STAMP's contention hides (genome; Sec. 6.2, Fig. 2, Table 4).**
   On TinySTM at 40 cores, aborts fall from 199,710 under STAMP to 8,179 with the redesign
@@ -245,18 +241,18 @@ order of magnitude of the counts. On a machine with fewer cores, compare at its 
   "self" shares, except the switch on abort, which is `cfibre_yield` in `top-children.txt`
   (`cfibre_yield` is called only from TinySTM's abort path, `backends/tinystm/tm.h`).*
 
-**Not supported, and why.**
+**Not covered.**
 
 - **HTM (Intel TSX) results** (HTM panels of Figs. 2-4 and S1-S9; the HTM statements in
   C1, C4 and Sec. 6.2, e.g. yada's 29.8% fallback rate). TSX is disabled by microcode on most
-  current Intel CPUs, so we do not ask reviewers to reproduce them. Everything is built with
+  current Intel CPUs, so they are not part of the claims above. Everything is built with
   `ae/build_all.sh --htm`, and `experiments.sh` includes the `rtm`/`stampede-htm` series
   automatically when `/proc/cpuinfo` reports `rtm`.
 - **Absolute speedups and abort counts** depend on the machine and on timing.
 
 ---
 
-## 5. Notes for reviewers
+### Notes on the measurement setup
 
 - **Machine setup.** For performance runs, disable Hyper-Threading and Turbo Boost if
   possible and leave the machine otherwise idle. PANDORA runs on libfibre (user-level
@@ -287,21 +283,8 @@ order of magnitude of the counts. On a machine with fewer cores, compare at its 
   `stm_store_ptr` wrappers instead look the descriptor up in thread-local storage on every
   access, which under libfibre is a `pthread_getspecific` call per pointer read; this
   slowed pointer-heavy workloads (vacation) and was not the configuration the paper's
-  TinySTM numbers were meant to reflect. All TinySTM numbers in the camera-ready paper were
-  measured with this artifact's `tm.h`.
-- **TinySTM re-measurement.** The submitted version's TinySTM abort counts (and some STAMP/TM
-  speedups) came from a TinySTM build that added, for diagnostics, a global atomic counter
-  update on every commit and abort (`-DSTATIC_ID`); that serializing update lowered aborts.
-  The camera-ready draft replaces every TinySTM number with measurements of the stock
-  TinySTM 1.0.5 shipped here (5 runs, 12 core counts). Under STAMP the abort counts grew
-  (e.g. kmeans_high 0.88 -> 11.8 billion at 40 cores); PANDORA's counts changed little, so
-  the reductions reported in Sec. 6.2 widened. One sentence of the submitted Sec. 6.2 (aborts
-  "rise 36-fold" without switching on kmeans) did not survive and was removed.
-- **genome correction.** After submission we found that a `thread_barrier_wait()` after
-  step 1 of genome's sequencer had been commented out in PANDORA (`genome/sequencer.c`).
-  This artifact contains the corrected code, which matches STAMP at that point
-  (`diffs/genome.diff`); all genome numbers in the camera-ready paper and in `data/` were
-  re-measured with it. The conclusions did not change.
+  TinySTM numbers were meant to reflect. All TinySTM numbers in the paper were measured
+  with this `tm.h`.
 - **TinySTM in the STAMP baseline.** `orig/switch-stamp/tinySTM-1.0.5` differs from the copy
   used by PANDORA only in debugging aids that are compiled out and in summing the
   per-thread commit/abort counters into global ones when a thread exits, which it prints at
@@ -343,25 +326,48 @@ order of magnitude of the counts. On a machine with fewer cores, compare at its 
 
 ---
 
-## 6. Reusing PANDORA
+## Repository layout
 
-- **Other core counts / repetitions:** `CORES=... REPS=...` (Sec. 3), or `ae/run.sh` directly.
-- **Another TM runtime:** add `backends/<name>/{tm.h,Makefile}` (start from
-  `backends/tinystm` and map the `TM_*` macros to your runtime), add `<name>` to `STMS` in
-  `ae/common.sh`, and rebuild with `ae/build_all.sh`. The workloads need no change: keeping
-  conflict detection, version management and scheduling below the `TM_*` interface is the
-  point of the suite (Sec. 4, Sec. 5.1).
-- **Other inputs:** every configuration's arguments are in `args_of` in `ae/common.sh`
-  (`large` = the paper's, `small` = smoke-test inputs).
-- **Without libfibre** (non-x86/Arm): comment out `USE_ULT` in `common/env.mk`.
-- **Programming-effort analysis of new code:** `scripts/run_cloc_analysis.sh <backend> <workload>`.
+```
+README.md            this file
+CHANGES.md           version history
+CITATION.cff         how to cite
+docker/Dockerfile    build/run environment (Ubuntu 20.04, gcc 9.4 -- the paper's toolchain)
+ae/                  build / run / plot scripts (start here)
+  kick_the_tires.sh    build + small-input smoke test of all nine configurations
+  experiments.sh       E1-E5 (Running the experiments)
+  run_all.sh           E1 ... E4 back to back, unattended, with timings
+  build_all.sh         build every binary of every series (~5 min)
+  run.sh               run any series x configuration x core count x repetitions
+  collect.py           raw logs -> results/runs.csv, results/summary.csv
+  plot.py              summary -> results/figures/*.png, overlaid on the paper's curves
+  paper_figures.py     the paper's figures, in the paper's layout, from data/ or from your runs
+  prepare_inputs.sh    create/verify the large inputs (done automatically on first use)
+  clean.sh             remove build products (--dist: back to the shipped state)
+  profile.sh           optional perf profiles of Sec. 6.2 (host only)
+  common.sh            single source of truth: workload arguments and series definitions
+  stampede/            fetch.sh: rebuild orig/stampede from upstream + our patches
+<workload>/          PANDORA workloads: genome intruder kmeans labyrinth ssca2 vacation yada
+lib/ common/         shared harness (threads, libfibre integration, TM macro layer)
+backends/            per-backend tm.h + Makefile (TM runtimes, locks, sequential)
+tinySTM-1.0.5/ tl2/ norec/ swisstm/   STM runtimes
+ULT/libfibre/        user-level threads (libfibre, GPLv3)
+allocator/           the TCMalloc used by PANDORA and STAMP: gperftools 2.13 + one-line patch
+orig/switch-stamp/   STAMP baseline: STAMP/TM and sequential STAMP (the speedup denominator)
+orig/stampede/       Stampede baseline (Nguyen & Pingali, ASPLOS'17), created by ae/stampede/fetch.sh
+inputs/              all inputs, shared by PANDORA, STAMP and Stampede
+scripts/             original build/run/LOC scripts (used by ae/)
+data/                the exact numbers plotted in the paper (speedup.csv, loc.csv, ...)
+diffs/               STAMP -> PANDORA source diffs, per workload (paper Sec. 5, appendix Sec. A)
+MAPPING.md           paper figure/table -> experiment -> output file
+NOTICE               licensing index
+```
 
 ---
 
-## 7. Licensing
+## Licensing
 
-See `LICENSE` (GPLv3) and `NOTICE`. PANDORA derives from STAMP (BSD-style). Bundled runtimes keep their own
-licenses; libfibre is GPLv3, so redistribution of the archive as a whole is subject to the
-GPLv3. Stampede and Galois 2.2.1 are third-party code under their own terms; the public
-(Zenodo) version of this artifact therefore ships only our patches for them, and
-`ae/stampede/fetch.sh` downloads the upstream sources and rebuilds `orig/stampede`.
+See `LICENSE` (GPLv3) and `NOTICE`. PANDORA derives from STAMP (BSD-style). Bundled runtimes
+keep their own licenses; libfibre is GPLv3, so redistribution of the tree as a whole is
+subject to the GPLv3. Stampede and Galois 2.2.1 are third-party code under their own terms
+and are not included; `ae/stampede/fetch.sh` downloads them and applies our patches.
