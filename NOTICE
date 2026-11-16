@@ -31,7 +31,8 @@ User-level threading
   - ULT/libfibre/   libfibre ("Fred"), GPLv3 (ULT/libfibre/LICENSE). Provenance/commit is in
                     MAPPING.md Sec. 1; local changes (a two-option build-config tweak and a
                     stack-alignment fix in src/runtime/Stack.S) are in diffs/libfibre.diff.
-  - ULT/fibre/      thin pthread-compatible wrapper (part of this work)
+  - ULT/fibre/      pthread-to-libfibre wrapper, derived from MassiveThreads' pthread wrapper;
+                    BSD-style (ULT/fibre/LICENSE.MassiveThreads, ULT/fibre/README.md)
 
 Because libfibre is licensed under GPLv3, redistribution of this archive as a whole is subject
 to the terms of the GPLv3. Modifications made for this work are documented under diffs/.
