@@ -1,6 +1,6 @@
 include Makefile.common
 
-# added by s_sakai
+# local addition: diagnostic build option (off; not used for the paper's measurements)
 # DEFINES += -DSTATIC_ID
 
 ########################################################################

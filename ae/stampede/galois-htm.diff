@@ -74,13 +74,10 @@ diff -ruN -x build ga/CMakeLists.txt gb/CMakeLists.txt
  endif()
  
  # PThreads
-@@ -236,13 +258,19 @@
+@@ -236,13 +258,16 @@
    set(BOOST_ROOT $ENV{BOOST_DIR})
  endif()
  find_package(Boost 1.38.0 REQUIRED)
-+
-+set(Boost_INCLUDE_DIR "/project/camp/user/s_sakai/lib/boost_1_80_0/boost")
-+
  include_directories(${Boost_INCLUDE_DIR})
  
  # C++11 features
@@ -98,7 +95,7 @@ diff -ruN -x build ga/CMakeLists.txt gb/CMakeLists.txt
  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CXX11_FLAGS}")
  
  include(CheckEndian)
-@@ -297,7 +325,7 @@
+@@ -297,7 +322,7 @@
  include_directories(include)
  
  add_subdirectory(src)

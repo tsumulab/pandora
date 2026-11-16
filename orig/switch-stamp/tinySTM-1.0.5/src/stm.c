@@ -354,7 +354,7 @@ stm_exit(void)
   printf("#aborts>=2    : %lu \n", _tinystm.stats.nb_aborts_2);
 #endif
 
-// added by s_sakai
+// local addition: per-transaction abort counts (STATIC_ID build only; off by default)
 #if defined(STATIC_ID)
   printf("\nNumber of aborts for each Tx\n");
   printf("%ld", _tinystm.abort_each_tx[0]);
@@ -407,7 +407,7 @@ stm_start(stm_tx_attr_t attr)
   return int_stm_start(tx, attr);
 }
 
-// added by s_sakai
+// local addition: stm_start() that also takes a static transaction id
 _CALLCONV sigjmp_buf *
 stm_start_id(stm_tx_attr_t attr, unsigned int id)
 {

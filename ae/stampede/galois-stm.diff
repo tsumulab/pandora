@@ -25,7 +25,7 @@ diff -ruN -x build ga/CMakeLists.txt gb/CMakeLists.txt
  endif()
  
  # PThreads
-@@ -231,11 +241,14 @@
+@@ -231,11 +241,11 @@
  endif()
  
  # Boost
@@ -36,9 +36,6 @@ diff -ruN -x build ga/CMakeLists.txt gb/CMakeLists.txt
    set(BOOST_ROOT $ENV{BOOST_DIR})
  endif()
  find_package(Boost 1.38.0 REQUIRED)
-+
-+set(Boost_INCLUDE_DIR "/project/camp/user/s_sakai/lib/boost_1_80_0/boost")
-+
  include_directories(${Boost_INCLUDE_DIR})
  
  # C++11 features

@@ -314,7 +314,7 @@ void stm_exit_thread_tx(struct stm_tx *tx) _CALLCONV;
  *   (flat nesting).
  */
 sigjmp_buf *stm_start(stm_tx_attr_t attr) _CALLCONV;
-// added by s_sakai
+// local addition (STAMP baseline only)
 sigjmp_buf *stm_start_id(stm_tx_attr_t attr, unsigned int id) _CALLCONV;
 sigjmp_buf *stm_start_tx(struct stm_tx *tx, stm_tx_attr_t attr) _CALLCONV;
 //@}

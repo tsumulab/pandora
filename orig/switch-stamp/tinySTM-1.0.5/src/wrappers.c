@@ -263,7 +263,7 @@ _CALLCONV void *stm_load_ptr(volatile void **addr)
   return convert.v;
 }
 
-// added by s_sakai
+// local addition (STAMP baseline only)
 _CALLCONV void *stm_load_ptr_tx(stm_tx_t *tx, volatile void **addr)
 {
   union { stm_word_t w; void *v; } convert;
@@ -491,7 +491,7 @@ _CALLCONV void stm_store_ptr(volatile void **addr, void *value)
   TM_STORE((stm_word_t *)addr, convert.w);
 }
 
-// added by s_sakai
+// local addition (STAMP baseline only)
 _CALLCONV void stm_store_ptr_tx(stm_tx_t *tx, volatile void **addr, void *value)
 {
   union { stm_word_t w; void *v; } convert;

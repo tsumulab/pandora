@@ -399,7 +399,7 @@ typedef struct stm_tx {                 /* Transaction descriptor */
   unsigned int nb_false_conflicts;      /* Number of false conflicts in the ORT */
   unsigned int nb_ok;                   /* "true" conflicts */
 #endif
-  // added by s_sakai
+  // local addition (STAMP baseline only)
   unsigned int static_id;               /* Static ID for Tx */
 } stm_tx_t;
 
@@ -445,7 +445,7 @@ typedef struct {
   volatile stm_word_t addr[LOCK_ARRAY_SIZE] ALIGNED; /* stores the last address that caused the update
 							of the version word in the ORT */
 #endif
-  // added by s_sakai
+  // local addition (STAMP baseline only)
 #if defined(STATIC_ID)
   unsigned int abort_each_tx[20];
   // add by h-sato
@@ -1112,7 +1112,7 @@ stm_rollback(stm_tx_t *tx, unsigned int reason)
   /* Reset field to restart transaction */
   int_stm_prepare(tx);
 
-// added by s_sakai
+// local addition (STAMP baseline only)
 #if defined(STATIC_ID)
   // printf("Tx(%d) Abort\n", tx->static_tx_id);
   // _tinystm.abort_each_tx[tx->static_id]++;
@@ -1321,7 +1321,7 @@ int_stm_init_thread(void)
 #ifdef IRREVOCABLE_ENABLED
   tx->irrevocable = 0;
 #endif /* IRREVOCABLE_ENABLED */
-  // added by s_sakai
+  // local addition (STAMP baseline only)
   tx->static_id = 0;
   /* Store as thread-local data */
   tls_set_tx(tx);
@@ -1452,7 +1452,7 @@ int_stm_start(stm_tx_t *tx, stm_tx_attr_t attr)
   return &tx->env;
 }
 
-// added by s_sakai
+// local addition (STAMP baseline only)
 static INLINE sigjmp_buf *
 int_stm_start_id(stm_tx_t *tx, stm_tx_attr_t attr, int id)
 {
