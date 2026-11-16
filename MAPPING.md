@@ -4,14 +4,14 @@ Paper: *"Measuring Transactional Memory: PANDORA and the Division of Labor"* (PP
 For how to run things, see `README.md`; this file says which experiment produces which
 figure or table, and where the paper's own numbers are.
 
-## 1. Measurement environment (paper Sec. 6.1, Tables 2-3)
+## 1. Measurement environment (paper Sec. 6.1, Table 2)
 
 | Item | Paper | Artifact |
 |---|---|---|
 | CPU | Intel Xeon Platinum 8380 (Ice Lake), 1 socket, 40 cores, 2.30 GHz; HT off, Turbo off | your machine |
 | Memory / caches | 64 GB; L1D 1.9 MiB / L2 50 MiB / L3 60 MiB | -- |
 | OS / compiler | Ubuntu 20.04, gcc/g++ 9.4.0, `-O2` | `docker/Dockerfile` (same) |
-| Allocator | TCMalloc | same (`common/env.mk`) |
+| Allocator | TCMalloc: gperftools 2.13 with eightfold transfer batches (Table 2, note c) | same (`allocator/`, `common/env.mk`) |
 | Threads | PANDORA TM: 4 fibers/core (libfibre); PANDORA locks: 1 fiber/core; STAMP and Stampede: 1 pthread/core | same (`ae/common.sh`: `series_tpc`) |
 | Repetitions | mean of 5 runs; cores 1, 2, 4, 8, 12, ..., 40 | default 3 runs at 1, N/2, N; `REPS`, `CORES` to change |
 | Speedup | over sequential STAMP on the same input | same (`ae/collect.py`) |
@@ -49,20 +49,22 @@ evaluation (Sec. 6.4; Sec. 5 footnote 1).
 | Item | Content | Experiment | Paper's numbers |
 |---|---|---|---|
 | Table 1 | STM design properties | descriptive (`backends/*/tm.h`, runtime sources) | -- |
-| Tables 2-3 | platform / execution environment | Sec. 1 above | -- |
+| Table 2 | execution environment per suite | Sec. 1 above | -- |
+| Table 3 | speedup at 40 cores at 1, 2, 4, 8 fibers/core | E1/E2 give the TinySTM points at 4 fibers/core, the fine-lock points at 1, and E2 kmeans_high on TinySTM at 1; the 2- and 8-fiber points and the other 1-fiber TinySTM and multi-fiber lock points are not scripted (see README, Not covered) | -- |
 | Table 4 | #Tx, \|R\|/\|W\|, Tx time, aborts STAMP->PANDORA (TinySTM @ 40 cores) | E3 | `data/table4.csv` |
 | Table 4 | LOC ratio (fine/TM) | E4 | `data/loc.csv` |
+| Table 4 | Seq. ratio (sequential STAMP / sequential PANDORA) | not scripted (see README, Not covered) | `data/table4.csv` |
+| Table 4 | switch gain (TinySTM @ 40 cores, switch on / off) | E2-full | `data/table4.csv`, `data/speedup.csv` (`Table4` rows) |
 | Fig. 1 | division-of-labor diagram | conceptual | -- |
-| Figs. 2-4 | speedup: genome, kmeans_high, ssca2 | E1 | `data/speedup.csv` (`S1(=Fig2)`, `S2(=Fig3)`, `S4(=Fig4)`) |
-| Fig. 5 | switch vs. non-switch, TinySTM, kmeans_high & ssca2 | E2 | `data/speedup.csv` (`switch=off` rows and the fine-lock curve) |
-| Figs. S1-S9 | speedup, all nine configurations x all TM systems | E1-full | `data/speedup.csv` |
-| Figs. S10-S11 | switch/non-switch, all TM systems, kmeans_high / ssca2 | E2-full | `data/speedup.csv` |
-| Fig. S12 | switch/non-switch, TinySTM, all configurations | E2-full | `data/speedup.csv` |
+| Figs. 2, 3, 5 | speedup: genome, kmeans_high, ssca2, TinySTM panel | E1 | `data/speedup.csv` (`Fig2`, `Fig3`, `Fig5`) |
+| Figs. 2-10 | speedup, all nine configurations x all TM systems | E1-full | `data/speedup.csv` (`Fig2` ... `Fig10`) |
+| Fig. 11 | switch vs. non-switch vs. fine lock, kmeans_high & ssca2, TinySTM panels | E2 | `data/speedup.csv` (`Fig11`) |
+| Fig. 11 | the same, all five TM systems | E2-full | `data/speedup.csv` (`Fig11`) |
 
-`ae/paper_figures.py` draws Figs. 2-5 and S1-S12 in the paper's layout, from
-`data/speedup.csv` (`--paper-csv`) or from your `results/summary.csv`.
-`ae/plot.py` draws each measured panel together with the paper's curve from
-`data/speedup.csv`. See `data/README.md` for that file's schema.
+`ae/paper_figures.py` draws Figs. 2-11 in the paper's layout, from `data/speedup.csv`
+(`--paper-csv`) or from your `results/summary.csv`. `ae/plot.py` draws each measured panel
+together with the paper's curve from `data/speedup.csv`. See `data/README.md` for that file's
+schema.
 
 ## 4. Source diffs
 
@@ -71,7 +73,7 @@ the versions shipped here; see `diffs/README.md`.
 
 | File | Shows | Paper |
 |---|---|---|
-| `diffs/{genome,intruder,kmeans,labyrinth,ssca2,vacation,yada}.diff` | per-workload redesign | Sec. 5.2, appendix Sec. A |
+| `diffs/{genome,intruder,kmeans,labyrinth,ssca2,vacation,yada}.diff` | per-workload redesign | Sec. 5.2 |
 | `diffs/lib.diff` | shared harness: threads, libfibre integration, TM macros, Table 4 counters | Sec. 5.1 |
 | `diffs/tinystm.diff` | TinySTM build configuration only (statistics, POSIX TLS, FORTIFY off) | Table 4 |
 | `diffs/libfibre.diff` | two libfibre build options | Sec. 5.1 |

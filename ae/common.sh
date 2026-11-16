@@ -54,10 +54,10 @@ args_of() {
 # ---------------------------------------------------------------------------
 # Series = one line in a figure. Each maps to <binary dir> + <run policy>.
 #   pandora-<tm>            PANDORA/TM, switch on, 4 fibers/core
-#   pandora-<tm>-noswitch   PANDORA/TM, switch off, 4 fibers/core (Fig. 5, S10-S12)
+#   pandora-<tm>-noswitch   PANDORA/TM, switch off, 4 fibers/core (Fig. 11, Table 4)
 #   pandora-fine-lock       PANDORA/fine-lock, 1 fiber/core
 #   pandora-coarse-lock     PANDORA/coarse-lock, 1 fiber/core
-#   pandora-tinystm-1fpc    PANDORA/TM on TinySTM at 1 fiber/core (kmeans, Sec. 6.2: "about 14x")
+#   pandora-tinystm-1fpc    PANDORA/TM on TinySTM at 1 fiber/core (kmeans, Sec. 6.2 and Table 3: "about 14x")
 #   pandora-tinystm-stats           instrumented TinySTM build, switch on  (Table 4)
 #   pandora-tinystm-noswitch-stats  instrumented TinySTM build, switch off (Sec. 6.2 abort ratios)
 #   stamp-<tm>              STAMP/TM (1 pthread/core)

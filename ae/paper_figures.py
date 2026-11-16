@@ -17,14 +17,17 @@ Examples (from the artifact root, also inside Docker):
     python3 ae/paper_figures.py                                # the same figures from your
                                          # runs (results/summary.csv) -> results/paper-figures/
 
-Output: <out>/speedup_<config>.<fmt>   Figs. 2-4 and S1-S9 (five TM panels)
-        <out>/switch_tinystm.<fmt>     Fig. 5 (kmeans_high, ssca2; single column)
-        <out>/switch_tinystm_all.<fmt> Fig. S12 (all nine configurations)
-        <out>/switch_<config>_all_tm.<fmt>  Figs. S10/S11 (kmeans_high, ssca2;
-                                       switch vs non-switch on all five TM systems)
+Output: <out>/speedup_<config>.<fmt>   Figs. 2-10 (one per configuration; five TM panels)
+        <out>/switch_all_tm.<fmt>      Fig. 11 (switch vs non-switch vs fine lock;
+                                       rows kmeans_high, ssca2; five TM panels each)
         <out>/legend_speedup.<fmt>     the shared legend on its own
+        Additional views, not figures of the paper:
+        <out>/switch_<config>_all_tm.<fmt>  one row of Fig. 11 (kmeans_high or ssca2)
+        <out>/switch_tinystm.<fmt>     kmeans_high and ssca2 on TinySTM (single column)
+        <out>/switch_tinystm_all.<fmt> TinySTM, all nine configurations (the speedups
+                                       behind Table 4's switch gain)
 
-The look reproduces the Excel/Illustrator figures of the paper:
+The look reproduces the paper's figures:
 same series, colours, markers, dash patterns, panel order, horizontal grid
 only, and Excel-like automatic y scaling (override with --ymax).
 Requires matplotlib (installed in the Docker image).
@@ -38,7 +41,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
 # --------------------------------------------------------------------------
-# Style (taken from the paper's figures)
+# Style (the paper's)
 # --------------------------------------------------------------------------
 FONT = ["Arial", "Liberation Sans", "Helvetica", "DejaVu Sans"]
 FS_TICK, FS_TITLE, FS_LEGEND = 8, 9, 8
@@ -47,7 +50,8 @@ DASH = (0, (2.0, 1.1))
 GRID, AXIS, TEXT = "#D9D9D9", "#BFBFBF", "#404040"
 
 RED, LIGHTBLUE, NAVY = "#E8262D", "#2E9BD6", "#1F4E79"
-ORANGE, PURPLE = "#F5A623", "#7B3F9E"
+PINK = "#F28DB2"
+ORANGE, PURPLE, GREEN = "#F5A623", "#7B3F9E", "#3A9E4F"
 
 # label: (color, linestyle, marker)
 STYLE = {
@@ -55,9 +59,9 @@ STYLE = {
     "PANDORA/fine-grained lock":   (LIGHTBLUE, DASH, "D"),
     "PANDORA/coarse-grained lock": (NAVY,      DASH, "D"),
     "Stampede/TM":                 (ORANGE,    "-",  "^"),
-    "STAMP/TM":                    (PURPLE,    "-",  "o"),
+    "STAMP/TM":                    (GREEN,     "-",  "o"),
     "switch":                      (RED,       "-",  "D"),
-    "non-switch":                  (RED,       DASH, "D"),
+    "non-switch":                  (PINK,      "-",  "D"),
     "fine lock":                   (LIGHTBLUE, DASH, "D"),
 }
 # Lock series get hollow markers drawn above the TM lines, so that a lock curve
@@ -71,8 +75,9 @@ HOLLOW_SCALE, HOLLOW_EDGE = 1.35, 1.0
 SPEEDUP_ORDER = ["PANDORA/TM", "PANDORA/fine-grained lock", "PANDORA/coarse-grained lock",
                  "Stampede/TM", "STAMP/TM"]
 SWITCH_ORDER = ["switch", "non-switch", "fine lock"]
+SWITCH_DRAW = ["non-switch", "fine lock", "switch"]      # Fig. 11, bottom to top
 
-# Panels of Figs. 2-4 / S1-S9: (title, AE suffix of pandora-/stamp-, Stampede series)
+# Panels of Figs. 2-10: (title, AE suffix of pandora-/stamp-, Stampede series)
 TM_PANELS = [
     ("TL2",       "tl2",     None),
     ("TinySTM",   "tinystm", "stampede-tinystm"),
@@ -207,9 +212,24 @@ def style_axes(ax, title, ymax, ystep, xmax):
     ax.spines["bottom"].set_linewidth(0.8)
 
 
+# Marker sizes of Figs. 2-10, nested so that coinciding points stay visible:
+# drawn bottom to top as STAMP/TM, Stampede/TM, locks, PANDORA/TM, each smaller than
+# the one below. A circle of size s is inscribed in a diamond of size s, so the
+# STAMP/TM circle (1.32x the lock diamond) shows as arcs outside a lock diamond, and
+# the lock diamond as a rim around the PANDORA/TM diamond. Other series keep MS.
+NESTED_MS = {"PANDORA/TM": 3.1, "PANDORA/fine-grained lock": 3.8,
+             "PANDORA/coarse-grained lock": 3.8, "Stampede/TM": 4.4 * 1.15 / 1.2,
+             "STAMP/TM": 5.0,
+             # Fig. 11, drawn bottom to top as non-switch, fine lock, switch: the
+             # switch and fine-lock sizes match PANDORA/TM and the locks above, and
+             # the non-switch diamond shows as a rim wherever it coincides.
+             "switch": 3.8, "fine lock": 3.8, "non-switch": 4.6}
+
+
 def marker_kw(label, legend=False):
     c, ls, mk = STYLE[label]
-    size = MS * (1.2 if mk == "^" else 1.0) + (1.5 if legend else 0)
+    base = MS if legend else NESTED_MS.get(label, MS)
+    size = base * (1.2 if mk == "^" else 1.0) + (1.5 if legend else 0)
     if HOLLOW_LOCKS and label in LOCKS:
         return dict(marker=mk, markersize=size * HOLLOW_SCALE, markerfacecolor="none",
                     markeredgecolor=c, markeredgewidth=HOLLOW_EDGE)
@@ -255,14 +275,12 @@ def add_legend(fig, labels, ncol, where="above", handlelength=4.5):
     leg._ae_anchor_y = y            # figure fraction; fit_canvas() moves it
 
 
-# figure numbers in the paper (Fig.) and in the supplementary material (S)
-FIG_IDS = {"speedup_genome": "Fig2_S1", "speedup_kmeans_high": "Fig3_S2",
-           "speedup_kmeans_low": "S3", "speedup_ssca2": "Fig4_S4",
-           "speedup_intruder": "S5", "speedup_yada": "S6",
-           "speedup_vacation_high": "S7", "speedup_vacation_low": "S8",
-           "speedup_labyrinth": "S9", "switch_kmeans_high_all_tm": "S10",
-           "switch_ssca2_all_tm": "S11", "switch_tinystm_all": "S12",
-           "switch_tinystm": "Fig5"}
+# figure numbers in the paper (PPoPP 2027)
+FIG_IDS = {"speedup_genome": "Fig2", "speedup_kmeans_high": "Fig3",
+           "speedup_kmeans_low": "Fig4", "speedup_ssca2": "Fig5",
+           "speedup_intruder": "Fig6", "speedup_vacation_high": "Fig7",
+           "speedup_vacation_low": "Fig8", "speedup_labyrinth": "Fig9",
+           "speedup_yada": "Fig10", "switch_all_tm": "Fig11"}
 NAME_BY_FIGURE = False
 
 
@@ -308,10 +326,25 @@ def tight_bbox(fig, pad=0.01):
     return Bbox.union(boxes).padded(pad)
 
 
-def save(fig, out, name, fmts):
+def fit_width(fig, maxw):
+    """Narrow the canvas until the saved figure (tight box, legends included) is no
+    wider than maxw inches, so that it is included at scale=1.0 and its text keeps
+    the size it was set in (PPoPP: no text below 8pt). Fonts and line widths are
+    unchanged; only the panels get narrower."""
+    for _ in range(8):
+        w = tight_bbox(fig).width
+        if w <= maxw:
+            return
+        W, H = fig.get_size_inches()
+        fig.set_size_inches(W - (w - maxw) - 0.004, H)
+
+
+def save(fig, out, name, fmts, maxw=None):
     if NAME_BY_FIGURE and name in FIG_IDS:
         name = f"{FIG_IDS[name]}_{name}"
     fit_canvas(fig)
+    if maxw:
+        fit_width(fig, maxw)
     for f in fmts:
         p = os.path.join(out, f"{name}.{f}")
         fig.savefig(p, bbox_inches=tight_bbox(fig), dpi=300)
@@ -400,7 +433,7 @@ def fig_switch(d, rows, tm, ncols, width, panel_h, ymax_override, xmax,
 
 
 def fig_switch_tms(d, cfg, width, ymax_override, xmax):
-    """Figs. S10/S11: switch vs non-switch on every TM system, one workload."""
+    """One row of Fig. 11: switch vs non-switch on every TM system, one workload."""
     panels = []
     for title, tm, _ in TM_PANELS:
         lines = [(lab, d[(s, cfg)]) for s, lab in series_for_switch(tm).items()
@@ -421,6 +454,46 @@ def fig_switch_tms(d, cfg, width, ymax_override, xmax):
             draw(ax, pts, lab)
         style_axes(ax, title, ymax, ystep, xmax)
         report_overlaps(f"switch_{cfg}_all_tm", title, lines, ymax)
+    add_legend(fig, SWITCH_ORDER, 3, "above")
+    return fig
+
+
+def fig_switch_tms_grid(d, cfgs, width, ymax_override, xmax, panel_h=1.3):
+    """Fig. 11: switch vs non-switch vs fine lock on every TM system,
+    one row per workload (kmeans_high, ssca2), each row on its own y scale,
+    the workload named at the left of its row, one legend above."""
+    rows = []
+    for cfg in cfgs:
+        panels = []
+        for title, tm, _ in TM_PANELS:
+            lines = [(lab, d[(s, cfg)]) for s, lab in series_for_switch(tm).items()
+                     if d.get((s, cfg))]
+            lines.sort(key=lambda t: SWITCH_ORDER.index(t[0]))
+            panels.append((title, lines))
+        if any(any(l == "non-switch" for l, _ in ls) for _, ls in panels):
+            rows.append((cfg, panels))
+    if not rows:
+        print("skip switch_all_tm: no non-switch data", file=sys.stderr)
+        return None
+    leg_h = 0.3
+    h = panel_h * len(rows) + leg_h
+    fig = plt.figure(figsize=(width, h))
+    gs = fig.add_gridspec(len(rows), 5, wspace=0.32, hspace=0.55,
+                          left=0.055, right=0.995, bottom=0.12 / len(rows),
+                          top=(h - leg_h - 0.22) / h)
+    for ri, (cfg, panels) in enumerate(rows):
+        vmax = max(v for _, ls in panels for _, pts in ls for _, v in pts)
+        ov = ymax_override.get(cfg)
+        ymax, ystep = (ov, step_for(ov)) if ov else nice_ymax(vmax)
+        axes = [fig.add_subplot(gs[ri, ci]) for ci in range(5)]
+        for ax, (title, lines) in zip(axes, panels):
+            for lab, pts in sorted(lines, key=lambda t: SWITCH_DRAW.index(t[0])):
+                draw(ax, pts, lab)
+            style_axes(ax, title, ymax, ystep, xmax)
+            report_overlaps(f"switch_all_tm/{cfg}", title, lines, ymax)
+        p = axes[0].get_position()
+        fig.text(0.004, p.y0 + p.height / 2, cfg, rotation=90, ha="left", va="center",
+                 fontsize=FS_TITLE, color=TEXT)
     add_legend(fig, SWITCH_ORDER, 3, "above")
     return fig
 
@@ -446,7 +519,8 @@ def main():
     ap.add_argument("--legend", default="paper", choices=["paper", "all", "none"],
                     help="paper: legend on genome and switch figures only")
     ap.add_argument("--width-in", type=float, default=7.0,
-                    help="two-column figure width in inches (set to \\textwidth)")
+                    help="two-column figure width in inches; figures are made no wider, for scale=1.0 "
+                         "(acmart sigplan: \\textwidth = 7in)")
     ap.add_argument("--column-in", type=float, default=3.33,
                     help="one-column figure width in inches (set to \\columnwidth)")
     ap.add_argument("--xmax", type=int, default=None,
@@ -457,7 +531,9 @@ def main():
     ap.add_argument("--hollow-locks", action="store_true",
                     help="hollow lock markers drawn above TM lines")
     ap.add_argument("--name-by-figure", action="store_true",
-                    help="prefix file names with the figure number (Fig2_S1_..., S3_..., S10_...)")
+                    help="prefix file names with the paper's figure number (Fig2_..., Fig11_...)")
+    ap.add_argument("--font-file", default=None, metavar="TTF",
+                    help="use this font file first (e.g. arial.ttf); needs matplotlib >= 3.2")
     ap.add_argument("--only", nargs="*", default=None, metavar="CONFIG",
                     help="restrict speedup figures to these configurations")
     a = ap.parse_args()
@@ -465,6 +541,12 @@ def main():
     global HOLLOW_LOCKS, NAME_BY_FIGURE
     HOLLOW_LOCKS = a.hollow_locks
     NAME_BY_FIGURE = a.name_by_figure
+    if a.font_file:
+        from matplotlib import font_manager
+        if not hasattr(font_manager.fontManager, "addfont"):
+            sys.exit("--font-file needs matplotlib >= 3.2")
+        font_manager.fontManager.addfont(a.font_file)
+        FONT.insert(0, font_manager.FontProperties(fname=a.font_file).get_name())
     matplotlib.rcParams.update({
         "font.family": "sans-serif", "font.sans-serif": FONT,
         "pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none",
@@ -489,23 +571,26 @@ def main():
         leg = a.legend == "all" or (a.legend == "paper" and cfg in LEGEND_ON)
         fig = fig_speedup(d, cfg, leg, a.width_in, yov.get(cfg), xmax)
         if fig:
-            save(fig, out, f"speedup_{cfg}", fmts)
+            save(fig, out, f"speedup_{cfg}", fmts, a.width_in)
     save(fig_legend_only(a.width_in), out, "legend_speedup", fmts)
 
     tm = a.switch_tm
     fig = fig_switch(d, [["kmeans_high", "ssca2"]], tm, 2, a.column_in, 1.4, yov, xmax,
                      legend_where="below", handlelength=3.0)
     if fig:
-        save(fig, out, f"switch_{tm}", fmts)
+        save(fig, out, f"switch_{tm}", fmts, a.column_in)
     for cfg in ("kmeans_high", "ssca2"):
         fig = fig_switch_tms(d, cfg, a.width_in, yov.get(cfg), xmax)
         if fig:
-            save(fig, out, f"switch_{cfg}_all_tm", fmts)
+            save(fig, out, f"switch_{cfg}_all_tm", fmts, a.width_in)
+    fig = fig_switch_tms_grid(d, ["kmeans_high", "ssca2"], a.width_in, yov, xmax)
+    if fig:
+        save(fig, out, "switch_all_tm", fmts, a.width_in)
     s12 = [["genome", "kmeans_high", "kmeans_low", "ssca2"],
            ["intruder", "yada", "vacation_high", "vacation_low", "labyrinth"]]
     fig = fig_switch(d, s12, tm, 5, a.width_in, 1.45, yov, xmax)
     if fig:
-        save(fig, out, f"switch_{tm}_all", fmts)
+        save(fig, out, f"switch_{tm}_all", fmts, a.width_in)
 
 
 if __name__ == "__main__":

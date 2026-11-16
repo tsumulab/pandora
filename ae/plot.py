@@ -4,7 +4,7 @@
     python3 ae/plot.py [--results DIR] [--size large|small] [--no-paper]
 
 For every configuration, one PNG per TM system is written to results/figures/,
-mirroring the panels of Figures 2-4 and S1-S9 (and Fig. 5 / S10-S12 for the
+mirroring the panels of Figures 2-10 (and Fig. 11 for the
 switch/non-switch pairs). Solid lines + markers are your measurements;
 dashed lines are the values plotted in the paper (data/speedup.csv). Absolute
 values depend on the machine; what should match is the shape and ordering of

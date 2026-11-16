@@ -20,21 +20,21 @@ HTM_SERIES=""; has_rtm && [[ -x $(series_bin pandora-rtm genome) ]] && HTM_SERIE
 run() { "$AE_DIR/run.sh" -r "$REPS" "$@"; }
 finish() { python3 "$AE_DIR/collect.py" && python3 "$AE_DIR/plot.py"; }
 
-E1() {  # Figures 2-4 (genome, kmeans_high, ssca2), TinySTM panel
+E1() {  # Figures 2, 3, 5 (genome, kmeans_high, ssca2), TinySTM panel
   run -c "genome kmeans_high ssca2" -n "$CORES" \
       -s "stamp-seq pandora-tinystm pandora-fine-lock pandora-coarse-lock stamp-tinystm stampede-tinystm"
 }
-E1_full() {  # Figures S1-S9: all nine configurations, all TM systems
+E1_full() {  # Figures 2-10: all nine configurations, all TM systems
   run -n "$CORES" -s "stamp-seq pandora-fine-lock pandora-coarse-lock stampede-tinystm \
       $(for t in "${STMS[@]}"; do echo pandora-$t stamp-$t; done) $HTM_SERIES"
 }
-E2() {  # Figure 5: switch vs non-switch, TinySTM, kmeans_high and ssca2;
-        # plus kmeans_high at 1 fiber/core (Sec. 6.2, "about 14x")
+E2() {  # Figure 11, TinySTM panels: switch vs non-switch, kmeans_high and ssca2;
+        # plus kmeans_high at 1 fiber/core (Table 3, Sec. 6.2, "about 14x")
   run -c "kmeans_high ssca2" -n "$CORES" \
       -s "stamp-seq pandora-tinystm pandora-tinystm-noswitch pandora-fine-lock"
   run -c "kmeans_high" -n "$MAX" -s "pandora-tinystm-1fpc"
 }
-E2_full() {  # Figures S10-S12
+E2_full() {  # Figure 11 (all TM systems) and Table 4's switch gain (TinySTM, all configurations)
   run -c "kmeans_high ssca2" -n "$CORES" \
       -s "stamp-seq $(for t in "${STMS[@]}"; do echo pandora-$t pandora-$t-noswitch; done)"
   run -n "$CORES" -s "stamp-seq pandora-tinystm pandora-tinystm-noswitch"

@@ -15,18 +15,18 @@ vacation_high 15.206107, vacation_low 11.56033, yada 6.1).
 
 ## Files
 
-- `speedup.csv` -- speedup data for Figures 2-4 and S1-S12 (see the figure notes below).
-- `switch_extra.csv` -- series from the switch-comparison and exploratory charts (Fig 5, S10-S12,
-  and some non-paper charts).
+- `speedup.csv` -- speedup data for Figures 2-11 and for Table 4's switch gain.
+- `switch_extra.csv` -- series of the authors' switch-comparison and exploratory charts.
 - `loc.csv` -- the LOC table behind Table 4's LOC ratio.
+- `table4.csv` -- Table 4.
 
-## `speedup` (Figures 2-4 and S1-S9)
+## `speedup.csv` (Figures 2-11, Table 4's switch gain)
 
 One row per plotted point. Speedup is over sequential STAMP on the same input.
 
 | column | meaning |
 |---|---|
-| figure | which paper figure (e.g. `S1(=Fig2)`) |
+| figure | paper figure: `Fig2` genome, `Fig3` kmeans_high, `Fig4` kmeans_low, `Fig5` ssca2, `Fig6` intruder, `Fig7` vacation_high, `Fig8` vacation_low, `Fig9` labyrinth, `Fig10` yada, `Fig11` switch vs non-switch; `Table4` (see below) |
 | tm_system | TL2 / TinySTM / NOrec / SwissTM / HTM (the panel) |
 | workload | genome, intruder, kmeans, labyrinth, ssca2, vacation, yada |
 | level | high / low / na (for kmeans, vacation) |
@@ -38,15 +38,12 @@ One row per plotted point. Speedup is over sequential STAMP on the same input.
 The sequential-STAMP reference line (`STAMP/seq`) is the denominator, so it is 1.0 at every core
 by definition; it is omitted here rather than shipped as constant-1 rows.
 
-Figure map (switch = on / na rows): S1=Fig 2 genome, S2=Fig 3 kmeans_high, S3 kmeans_low,
-S4=Fig 4 ssca2, S5 intruder, S6 yada, S7 vacation_high, S8 vacation_low, S9 labyrinth. Some
-combinations are absent by design (Stampede's STM results use TinySTM only; yada has no
-fine-grained lock).
-
-The **nonswitch** rows (`switch = off`) belong to the switch-analysis figures, not the S1-S9
-panels: `S10` = kmeans_high across all 5 TM systems, `S11` = ssca2 across all 5 TM systems,
-`S12` = TinySTM across the remaining workloads. (kmeans_high/ssca2 on TinySTM also appear in
-S12 in the paper; here they are tagged S10/S11.)
+Rows with `switch = on` or `na` are the curves of Figures 2-10. Some combinations are absent by
+design (Stampede's STM results use TinySTM only; yada has no fine-grained lock). Rows with
+`switch = off` are the non-switch curves: on all five TM systems for kmeans_high and ssca2
+(`Fig11`, drawn there with the switch and fine-lock curves of the same workload), and on TinySTM
+for the other seven configurations (`Table4`). Table 4's switch gain is the ratio of the
+`switch = on` to the `switch = off` speedup of PANDORA/TM on TinySTM at 40 cores.
 
 The `PANDORA/fine-lock` and `PANDORA/coarse-lock` curves are **independent of the TM backend**
 (they use locks, not TM), so for a given workload the same curve is listed under every
@@ -64,11 +61,11 @@ result cells in the source sheet (the SwissTM charts had been zeroed).
 identical lock curves (TM-independent). A cross-system consistency check found **no** lock-curve
 disagreements for any workload.
 
-## `switch_extra` (Figure 5, S10-S12, and exploratory charts)
+## `switch_extra.csv`
 
-Series from the switch-comparison and other charts in the workbook, kept with their original
-labels and **not** auto-classified. This includes the material behind Figure 5 and S10-S12 as
-well as some charts not used in the paper. Columns: `chart`, `chart_title`, `series_label`,
+Series from the switch-comparison and other charts in the authors' workbook, kept with their
+original labels and **not** auto-classified; some of these charts are not in the paper. The
+figures of the paper are drawn from `speedup.csv`. Columns: `chart`, `chart_title`, `series_label`,
 `cores`, `value`. The TinySTM series of these charts (PANDORA switch/non-switch and STAMP; 288
 points) follow the TinySTM measurements of `speedup.csv`: each point is scaled by the ratio of
 the two measurements of the same point, which keeps each chart's own normalisation (some charts differ from `speedup.csv` by up to +/-13%).
@@ -93,8 +90,9 @@ slightly run to run, as is normal.
 
 The values of Table 4, one row per configuration: `tx_count` (#Tx), `read_set` /
 `write_set` (mean |R| / |W| per committed transaction), `tx_time_pct` (share of aggregate core
-time spent in transactions), `aborts_stamp` -> `aborts_pandora`, and `loc_ratio_fine_tm` (empty
-for yada), plus `aborts_pandora_noswitch` (the same instrumented build with switching off,
+time spent in transactions), `aborts_stamp` -> `aborts_pandora`, `loc_ratio_fine_tm` (empty
+for yada), `seq_ratio` (sequential STAMP time over sequential PANDORA time) and `switch_gain`
+(from `speedup.csv`, see above), plus `aborts_pandora_noswitch` (the same instrumented build with switching off,
 quoted in Sec. 6.2, not a column of the printed table). Compare with E3 (`results/summary.csv`, series `stamp-tinystm-stats` and
 `pandora-tinystm-stats` at 40 cores) and E4.
 

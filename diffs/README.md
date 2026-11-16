@@ -11,7 +11,7 @@ trees by hand.
   `lib.diff` are taken against it).
 - **TinySTM 1.0.5** -- upstream TinySTM (`tinystm.diff`).
 
-## Workload redesigns (paper Sec. 5.2 and appendix Sec. A)
+## Workload redesigns (paper Sec. 5.2)
 
 STAMP -> PANDORA source changes, one file per workload:
 

@@ -143,10 +143,10 @@ CORES="1 2 4 8 12 16 20 24 28 32 36 40" REPS=5 ae/experiments.sh E1   # the pape
 
 | Exp. | Command | Paper | Time (40 cores, defaults) |
 |---|---|---|---|
-| E1 | `ae/experiments.sh E1` | Figs. 2-4 (genome, kmeans_high, ssca2), TinySTM panel | 53 min |
-| E1-full | `ae/experiments.sh E1-full` | Figs. S1-S9 (9 configurations x all TM systems) | 11 h 16 min |
-| E2 | `ae/experiments.sh E2` | Fig. 5 (switch vs. non-switch, TinySTM); kmeans at 1 fiber/core | 7 min after E1 (reuses its runs) |
-| E2-full | `ae/experiments.sh E2-full` | Figs. S10-S12 | 55 min after E1-full |
+| E1 | `ae/experiments.sh E1` | Figs. 2, 3, 5 (genome, kmeans_high, ssca2), TinySTM panel | 53 min |
+| E1-full | `ae/experiments.sh E1-full` | Figs. 2-10 (9 configurations x all TM systems) | 11 h 16 min |
+| E2 | `ae/experiments.sh E2` | Fig. 11, TinySTM panels (switch vs. non-switch); kmeans_high at 1 fiber/core (Table 3) | 7 min after E1 (reuses its runs) |
+| E2-full | `ae/experiments.sh E2-full` | Fig. 11, all TM systems; Table 4, switch gain | 55 min after E1-full |
 | E3 | `ae/experiments.sh E3` | Table 4 (#Tx, \|R\|/\|W\|, Tx time, aborts); abort ratios of Sec. 6.2 | 25 min |
 | E4 | `ae/experiments.sh E4` | Table 4, LOC ratio (fine-lock/TM) | < 1 min |
 | E5 (optional) | `sudo ae/experiments.sh E5` on the host (not in Docker) | Sec. 6.2 profiling breakdowns (perf) | 1 min (6 profiles; after a build) |
@@ -155,13 +155,13 @@ CORES="1 2 4 8 12 16 20 24 28 32 36 40" REPS=5 ae/experiments.sh E1   # the pape
 
 - `results/figures/large_<config>_<TM>.png`: this machine's curves (solid) drawn over
   the curves of the paper (dashed, from `data/speedup.csv`), one file per panel.
-- `results/paper-figures/`: the paper's figures (Figs. 2-5, S1-S12) in the paper's layout,
+- `results/paper-figures/`: the paper's figures (Figs. 2-11) in the paper's layout,
   drawn from this machine's results by `python3 ae/paper_figures.py` (after `ae/collect.py`).
   `python3 ae/paper_figures.py --paper-csv data/speedup.csv` draws the same figures from the
   values plotted in the paper, into `results/paper-figures-data/`, for a side-by-side look.
-  File names: `speedup_<config>` (Figs. 2-4, S1-S9), `switch_tinystm` (Fig. 5),
-  `switch_<config>_all_tm` (S10, S11), `switch_tinystm_all` (S12); `--name-by-figure` prefixes
-  the figure number. Panels without data (e.g. HTM without TSX) are left empty.
+  File names: `speedup_<config>` (Figs. 2-10), `switch_all_tm` (Fig. 11), plus views that
+  are not figures of the paper (`switch_tinystm`, `switch_<config>_all_tm`,
+  `switch_tinystm_all`); `--name-by-figure` prefixes the figure number. Panels without data (e.g. HTM without TSX) are left empty.
 - `results/summary.csv`: one row per (series, configuration, core count) with mean and
   standard deviation of the execution time, the speedup over sequential STAMP, mean abort
   and commit counts and their ratio, and -- for the `-stats` series of E3 -- mean read/write-set
@@ -169,7 +169,8 @@ CORES="1 2 4 8 12 16 20 24 28 32 36 40" REPS=5 ae/experiments.sh E1   # the pape
   `avg_read_set` / `avg_write_set` of `pandora-tinystm-stats`; Aborts (STAMP -> PANDORA) =
   `aborts_mean` of `stamp-tinystm-stats` -> `pandora-tinystm-stats`. Tx time is printed per
   run as `Total Tx Time(second)` (column `tx_time_s` of `results/runs.csv`); divide it by
-  cores x execution time for the fraction reported in Table 4.
+  cores x execution time for the fraction reported in Table 4. Switch gain = `speedup` of
+  `pandora-tinystm` over `pandora-tinystm-noswitch` at 40 cores (E2-full).
 - E4 prints the LOC table; it is deterministic and must equal `data/loc.csv`.
 
 **Series names** (see `ae/common.sh`):
@@ -177,8 +178,8 @@ CORES="1 2 4 8 12 16 20 24 28 32 36 40" REPS=5 ae/experiments.sh E1   # the pape
 | Series | Meaning in the paper |
 |---|---|
 | `pandora-<tm>` | PANDORA/TM, `<tm>` in tinystm, tl2, norec, swisstm, rtm; 4 fibers/core, switching on |
-| `pandora-<tm>-noswitch` | same, switching off (Fig. 5, S10-S12) |
-| `pandora-tinystm-1fpc` | PANDORA/TM on TinySTM at 1 fiber/core (Sec. 6.2) |
+| `pandora-<tm>-noswitch` | same, switching off (Fig. 11, Table 4) |
+| `pandora-tinystm-1fpc` | PANDORA/TM on TinySTM at 1 fiber/core (Table 3, Sec. 6.2) |
 | `pandora-fine-lock`, `pandora-coarse-lock` | PANDORA lock versions, 1 fiber/core |
 | `pandora-tinystm[-noswitch]-stats` | instrumented TinySTM build (Table 4, Sec. 6.2 abort counts) |
 | `stamp-<tm>`, `stamp-seq` | STAMP/TM; sequential STAMP = speedup denominator |
@@ -201,7 +202,7 @@ followed by `python3 ae/collect.py && python3 ae/plot.py`.
 ### Claims
 
 Absolute speedups depend on the machine (ours: single-socket Xeon Platinum 8380, 40 cores,
-HT and Turbo off; Table 2); what should be reproduced is the shape and ordering of the
+HT and Turbo off; Sec. 6.1); what should be reproduced is the shape and ordering of the
 curves and the order of magnitude of the counts. On a machine with fewer cores, compare at
 its maximum.
 
@@ -210,19 +211,19 @@ its maximum.
 - **C1 -- PANDORA measures runtime costs that STAMP's contention hides (genome; Sec. 6.2, Fig. 2, Table 4).**
   On TinySTM at 40 cores, aborts fall from 199,710 under STAMP to 8,179 with the redesign
   alone (switching off) and to 2,903 with switching. Under PANDORA, genome scales on most
-  runtimes while NOrec falls behind STAMP beyond 16 cores. *E1, E1-full (NOrec panel), E3.*
+  runtimes while NOrec falls behind STAMP from 16 cores on. *E1, E1-full (NOrec panel), E3.*
 - **C2 -- PANDORA tells runtimes apart (kmeans; Sec. 6.2, Fig. 3, Table 4).**
   On TinySTM at 40 cores, aborts fall from about 11.8 billion (STAMP) and ~2.2 billion (Stampede)
   to 481,910 (PANDORA); per committed transaction 92 / 0.92 / 0.026. Four runtimes scale
   toward 30x while NOrec peaks near 16 cores and then declines. *E1, E1-full, E3.*
 - **C3 -- Runtime-side switching pays off where contention is high and not where it is
-  low (Sec. 6.2, Fig. 5, S10-S12).** kmeans_high on TinySTM at 40 cores: ~31x with switching,
+  low (Sec. 6.2, Fig. 11, Tables 3-4).** kmeans_high on TinySTM at 40 cores: ~31x with switching,
   ~12x without, ~14x at one fiber per core. ssca2: the non-switch configuration is about
   3.5% faster. *E2, E2-full, E3.*
-- **C4 -- PANDORA reports where its own redesign does not help (ssca2; Sec. 6.2, Fig. 4).**
+- **C4 -- PANDORA reports where its own redesign does not help (ssca2; Sec. 6.2, Fig. 5).**
   Aborts rise from 7,903 (STAMP) to 107,916 (PANDORA) as transaction boundaries grow; on the
   STMs PANDORA/TM approaches the fine-grained lock except on NOrec, TinySTM leading. *E1, E1-full, E3.*
-- **C5 -- TM and locks on equal terms (Sec. 6.1, Sec. 6.3, Figs. S1-S9).** On most workloads and
+- **C5 -- TM and locks on equal terms (Sec. 6.1, Sec. 6.3, Figs. 2-10).** On most workloads and
   runtimes PANDORA/TM exceeds the coarse-grained lock and approaches the fine-grained lock;
   kmeans_low is the exception for coarse locking; intruder and vacation keep measurable
   gaps. *E1-full.*
@@ -243,12 +244,15 @@ its maximum.
 
 **Not covered.**
 
-- **HTM (Intel TSX) results** (HTM panels of Figs. 2-4 and S1-S9; the HTM statements in
+- **HTM (Intel TSX) results** (HTM panels of Figs. 2-11; the HTM statements in
   C1, C4 and Sec. 6.2, e.g. yada's 29.8% fallback rate). TSX is disabled by microcode on most
   current Intel CPUs, so they are not part of the claims above. Everything is built with
   `ae/build_all.sh --htm`, and `experiments.sh` includes the `rtm`/`stampede-htm` series
   automatically when `/proc/cpuinfo` reports `rtm`.
 - **Absolute speedups and abort counts** depend on the machine and on timing.
+- **Table 3 beyond the series above** (TinySTM at 2 and 8 fibers per core, at 1 fiber on genome
+  and ssca2; the fine-grained lock at 2, 4 and 8) and **Table 4's Seq. ratio** (sequential
+  PANDORA) have no series in `ae/common.sh` yet; `data/table4.csv` holds the paper's values.
 
 ---
 
@@ -257,7 +261,7 @@ its maximum.
 - **Machine setup.** For performance runs, disable Hyper-Threading and Turbo Boost if
   possible and leave the machine otherwise idle. PANDORA runs on libfibre (user-level
   threads): `<cores>` OS workers, each multiplexing 4 fibers (TM) or 1 fiber (locks). STAMP
-  and Stampede use one pthread per core (Table 3). As for the paper's measurements, no
+  and Stampede use one pthread per core (Table 2). As for the paper's measurements, no
   thread-to-core binding is applied (`ENABLE_BIND` stays off in `common/env.mk`).
 - **Containers.** Running inside Docker is fine for the measurements. Stampede's Galois
   runtime disables its hardware-topology thread mapping when `/dev/cpuset` is absent and
@@ -358,7 +362,7 @@ orig/stampede/       Stampede baseline (Nguyen & Pingali, ASPLOS'17), created by
 inputs/              all inputs, shared by PANDORA, STAMP and Stampede
 scripts/             original build/run/LOC scripts (used by ae/)
 data/                the exact numbers plotted in the paper (speedup.csv, loc.csv, ...)
-diffs/               STAMP -> PANDORA source diffs, per workload (paper Sec. 5, appendix Sec. A)
+diffs/               STAMP -> PANDORA source diffs, per workload (paper Sec. 5.2)
 MAPPING.md           paper figure/table -> experiment -> output file
 NOTICE               licensing index
 ```
