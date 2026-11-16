@@ -13,3 +13,5 @@ lib/tm.h
 /orig/stampede/
 # AE outputs
 /results/
+__pycache__/
+*.pyc
