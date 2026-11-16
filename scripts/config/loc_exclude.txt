@@ -1,0 +1,10 @@
+# cloc から除外するパス。論文の LOC ratio の定義そのもの。
+# 方針: TM ランタイム / lock ライブラリ / 共有ハーネス / 入力パース / 計装コード を除外
+tinySTM-1.0.5/
+tl2/
+norec/
+swisstm/
+ULT/
+backends/
+common/
+inputs/

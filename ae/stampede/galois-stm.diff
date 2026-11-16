@@ -1,0 +1,193 @@
+diff -ruN -x build ga/CMakeLists.txt gb/CMakeLists.txt
+--- ga/CMakeLists.txt	2026-11-09 11:50:07.801785491 +0900
++++ gb/CMakeLists.txt	2025-02-18 19:08:34.000000000 +0900
+@@ -12,6 +12,10 @@
+   set(CMAKE_BUILD_TYPE "Release")
+ endif()
+ 
++set(CMAKE_C_FLAGS_RELEASE "-O2")
++set(CMAKE_CXX_FLAGS_RELEASE "-O2")
++set(CMAKE_VERBOSE_MAKEFILE ON)
++
+ ###### Options (alternatively pass as options to cmake -DName=Value) ######
+ set(USE_HWTOPO ON CACHE BOOL "Enable hardware topology mapping for threads")
+ set(USE_GPROF OFF CACHE BOOL "Enable GCC profiling")
+@@ -203,6 +207,12 @@
+   set(GALOIS_USE_TINYSTM on)
+   set(CMAKE_PREFIX_PATH ${TINYSTM_CMAKE_EXPORT} ${CMAKE_PREFIX_PATH})
+   find_package(tinystm REQUIRED NO_CMAKE_PACKAGE_REGISTRY)
++  include_directories(${tinystm_INCLUDE_DIRS})
++endif()
++
++# Disable TM exec
++if(USE_SEQ)
++  set(GALOIS_USE_SEQ on)
+ endif()
+ 
+ # PThreads
+@@ -231,11 +241,14 @@
+ endif()
+ 
+ # Boost
+-set(Boost_ADDITIONAL_VERSIONS "1.40" "1.40.0" "1.47" "1.47.0" "1.49" "1.49.0" "1.51.0")
+-if(NOT "$ENV{BOOST_DIR}" STREQUAL "") 
++set(Boost_ADDITIONAL_VERSIONS "1.40" "1.40.0" "1.47" "1.47.0" "1.49" "1.49.0" "1.51.0" "1.80.0")
++if(NOT "$ENV{BOOST_DIR}" STREQUAL "")
+   set(BOOST_ROOT $ENV{BOOST_DIR})
+ endif()
+ find_package(Boost 1.38.0 REQUIRED)
++
++set(Boost_INCLUDE_DIR "/project/camp/user/s_sakai/lib/boost_1_80_0/boost")
++
+ include_directories(${Boost_INCLUDE_DIR})
+ 
+ # C++11 features
+diff -ruN -x build ga/README gb/README
+--- ga/README	2014-02-28 04:57:28.000000000 +0900
++++ gb/README	2025-02-18 19:12:59.000000000 +0900
+@@ -2,3 +2,7 @@
+  http://iss.ices.utexas.edu/?p=projects/galois/doc/current/getting_started
+ 
+ See build/readme.txt for build instructions
++###
++This is the Galois for the TinySTM.
++Use the other Galois to execute the intelHTM. 
++###
+diff -ruN -x build ga/include/Galois/Runtime/ParallelWork.h gb/include/Galois/Runtime/ParallelWork.h
+--- ga/include/Galois/Runtime/ParallelWork.h	2026-11-09 11:50:07.805785573 +0900
++++ gb/include/Galois/Runtime/ParallelWork.h	2025-02-18 19:08:44.000000000 +0900
+@@ -79,7 +79,7 @@
+   }
+ 
+   void report() { 
+-    if (LL::getTID()) return;
++    // if (LL::getTID()) return;
+     TmReport_s stop;
+     tm_get_all_stats(&stop);
+     reportStat(loopname, "HTMTransactions", 
+@@ -480,7 +480,14 @@
+ 
+   void operator()() {
+     bool isLeader = LL::isPackageLeaderForSelf(LL::getTID());
+-    bool couldAbort = ForEachTraits<FunctionTy>::NeedsAborts && activeThreads > 1;
++#ifdef GALOIS_USE_SEQ
++    bool couldAbort = false;
++    // puts("use_Seq_mode");
++#else
++    bool couldAbort = ForEachTraits<FunctionTy>::NeedsAborts && activeThreads >= 1;
++    // puts("TMmode");
++#endif
++
+ #ifdef GALOIS_USE_HTM
+     couldAbort = false;
+ #endif
+diff -ruN -x build ga/include/Galois/Runtime/ll/CompilerSpecific.h gb/include/Galois/Runtime/ll/CompilerSpecific.h
+--- ga/include/Galois/Runtime/ll/CompilerSpecific.h	2014-02-28 04:56:21.000000000 +0900
++++ gb/include/Galois/Runtime/ll/CompilerSpecific.h	2025-02-18 19:08:44.000000000 +0900
+@@ -34,7 +34,7 @@
+ inline static void asmPause() {
+ #if defined(__i386__) || defined(__amd64__)
+   //  __builtin_ia32_pause();
+-  asm volatile ("pause"); 
++  // asm volatile ("pause"); 
+ #endif
+ }
+ 
+@@ -44,10 +44,10 @@
+ 
+ inline static void flushInstructionPipeline() {
+ #if defined(__i386__) || defined(__amd64__)
+-  asm volatile (
+-      "xor %%eax, %%eax;"
+-      "cpuid;"
+-      :::"%eax", "%ebx", "%ecx", "%edx");
++  // asm volatile (
++  //     "xor %%eax, %%eax;"
++  //     "cpuid;"
++  //     :::"%eax", "%ebx", "%ecx", "%edx");
+ #endif
+ }
+ 
+diff -ruN -x build ga/include/Galois/config.h.in gb/include/Galois/config.h.in
+--- ga/include/Galois/config.h.in	2026-11-09 11:50:07.805785573 +0900
++++ gb/include/Galois/config.h.in	2025-02-18 19:08:45.000000000 +0900
+@@ -20,6 +20,7 @@
+ #cmakedefine GALOIS_USE_VTUNE
+ #cmakedefine GALOIS_USE_PAPI
+ #cmakedefine GALOIS_USE_HTM
++#cmakedefine GALOIS_USE_SEQ
+ #cmakedefine GALOIS_USE_SEQ_ONLY
+ #cmakedefine GALOIS_USE_CXX11_COMPAT
+ #cmakedefine GALOIS_USE_LONGJMP
+diff -ruN -x build ga/src/ll/HWTopoNone.cpp gb/src/ll/HWTopoNone.cpp
+--- ga/src/ll/HWTopoNone.cpp	2026-11-09 11:50:07.809785655 +0900
++++ gb/src/ll/HWTopoNone.cpp	2025-02-18 19:08:50.000000000 +0900
+@@ -28,11 +28,33 @@
+ #include "Galois/Runtime/ll/gio.h"
+ 
+ #include <vector>
++#include <cassert>
++#include <cstdio>
++#include <cstring>
++#include <cerrno>
++
+ #include <sched.h>
++#include <sys/sysinfo.h>
+ 
+ using namespace Galois::Runtime::LL;
+ 
+ namespace {
++  static bool linuxBindToProcessor(int proc) {
++  cpu_set_t mask;
++  /* CPU_ZERO initializes all the bits in the mask to zero. */
++  CPU_ZERO( &mask );
++  
++  /* CPU_SET sets only the bit corresponding to cpu. */
++  // void to cancel unused result warning
++  (void)CPU_SET( proc, &mask );
++  
++  /* sched_setaffinity returns 0 in success */
++  if( sched_setaffinity( 0, sizeof(mask), &mask ) == -1 ) {
++    gWarn("Could not set CPU affinity for thread ", proc, "(", strerror(errno), ")");
++    return false;
++  }
++  return true;
++}
+ 
+ //! Flat machine with the correct number of threads and binding
+ struct Policy {
+@@ -41,13 +63,20 @@
+   unsigned numThreads, numCores, numPackages;
+ 
+   Policy() {
+-    for (int i = 0; i < 16; ++i) {
+-      for (int j = 0; j < 4; ++j) {
+-        procmap.push_back(j*16 + i);
+-      }
++    unsigned int maxPhysicalCoreNum = get_nprocs();
++    unsigned int maxLogicalCoreNum = get_nprocs();
++    unsigned int poolingThreads = maxPhysicalCoreNum;
++    // unsigned int poolingThreads = strtol(getenv("THREAD_NUM"), NULL, 10);
++
++    for (int i = 0; i < poolingThreads; i++) {
++      unsigned int targetCPU = (i+1) % maxLogicalCoreNum;
++      // printf("TOPO -- Thr.%d -> Proc.%d\n", i, targetCPU);
++      procmap.push_back(targetCPU);
+     }
++
+     numThreads = procmap.size();
+     numCores = procmap.size();
++    // numCores = maxLogicalCoreNum;
+     numPackages = 1;
+   }
+ };
+@@ -60,7 +89,8 @@
+ } //namespace
+ 
+ bool Galois::Runtime::LL::bindThreadToProcessor(int id) {
+-  return true;
++  assert(id < (int)getPolicy().procmap.size());
++  return linuxBindToProcessor(getPolicy().procmap[id]);
+ }
+ 
+ unsigned Galois::Runtime::LL::getProcessorForThread(int id) {

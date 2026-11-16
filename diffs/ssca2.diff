@@ -1,0 +1,1279 @@
+diff -ruN -X /tmp/exc master/stamp/ssca2/alg_radix_smp.c pandora-supplement/ssca2/alg_radix_smp.c
+--- master/stamp/ssca2/alg_radix_smp.c	2014-11-29 12:36:52.000000000 +0900
++++ pandora-supplement/ssca2/alg_radix_smp.c	2024-11-22 04:29:40.000000000 +0900
+@@ -193,9 +193,9 @@
+                             long bitOff,
+                             long m)
+ {
+-    long* myHisto = (long*)malloc(R * sizeof(long));
++    long* myHisto = (long*)P_MALLOC(R * sizeof(long));
+     assert(myHisto);
+-    long* psHisto = (long*)malloc(R * sizeof(long));
++    long* psHisto = (long*)P_MALLOC(R * sizeof(long));
+     assert(psHisto);
+ 
+     long* mhp = myHisto;
+@@ -232,8 +232,8 @@
+         mhp[j]++;
+     }
+ 
+-    free(psHisto);
+-    free(myHisto);
++    P_FREE(psHisto);
++    P_FREE(myHisto);
+ }
+ 
+ 
+@@ -424,17 +424,17 @@
+     unsigned long* lTemp  = NULL;
+     unsigned long* lTemp2 = NULL;
+ 
+-    lTemp = (unsigned long*)malloc(q * sizeof(unsigned long));
++    lTemp = (unsigned long*)P_MALLOC(q * sizeof(unsigned long));
+     assert(lTemp);
+-    lTemp2 = (unsigned long*)malloc(q * sizeof(unsigned long));
++    lTemp2 = (unsigned long*)P_MALLOC(q * sizeof(unsigned long));
+     assert(lTemp2);
+ 
+     all_countsort_node_aux_seq(q, lKeys, lSorted, auxKey, auxSorted, (1<<11),  0, 11);
+     all_countsort_node_aux_seq(q, lSorted, lTemp, auxSorted, lTemp2, (1<<11), 11, 11);
+     all_countsort_node_aux_seq(q, lTemp, lSorted, lTemp2, auxSorted, (1<<10), 22, 10);
+ 
+-    free(lTemp);
+-    free(lTemp2);
++    P_FREE(lTemp);
++    P_FREE(lTemp2);
+ }
+ 
+ 
+diff -ruN -X /tmp/exc master/stamp/ssca2/computeGraph.c pandora-supplement/ssca2/computeGraph.c
+--- master/stamp/ssca2/computeGraph.c	2014-11-29 12:36:52.000000000 +0900
++++ pandora-supplement/ssca2/computeGraph.c	2025-04-15 18:31:53.000000000 +0900
+@@ -80,6 +80,12 @@
+ static ULONGINT_T   global_outVertexListSize = 0;
+ static ULONGINT_T*  global_impliedEdgeList   = NULL;
+ static ULONGINT_T** global_auxArr            = NULL;
++#ifdef FINE_LOCK
++LOCK_T global_maxNumVertices_lock;
++LOCK_T global_outVertexListSize_lock;
++LOCK_T *inDegree_lock;
++LOCK_T *auxArr_lock;
++#endif
+ 
+ 
+ /* =============================================================================
+@@ -149,6 +155,7 @@
+  * computeGraph
+  * =============================================================================
+  */
++#ifndef FINE_LOCK
+ void
+ computeGraph (void* argPtr)
+ {
+@@ -182,14 +189,14 @@
+ 
+     TM_BEGIN();
+     long tmp_maxNumVertices = (long)TM_SHARED_READ(global_maxNumVertices);
+-    long new_maxNumVertices = MAX(tmp_maxNumVertices, maxNumVertices) + 1;
++    // long new_maxNumVertices = MAX(tmp_maxNumVertices, maxNumVertices) + 1;
++    long new_maxNumVertices = MAX(tmp_maxNumVertices, maxNumVertices + 1);
+     TM_SHARED_WRITE(global_maxNumVertices, new_maxNumVertices);
+     TM_END();
+-
+     thread_barrier_wait();
+ 
+     maxNumVertices = global_maxNumVertices;
+-
++#ifndef CHANGEMALLOCLOCATION
+     if (myId == 0) {
+ 
+         GPtr->numVertices = maxNumVertices;
+@@ -213,9 +220,62 @@
+             (ULONGINT_T*)P_MALLOC((GPtr->numVertices) * sizeof(ULONGINT_T));
+         assert(GPtr->outVertexIndex);
+     }
++#endif
++#ifdef CHANGEMALLOCLOCATION
++    ULONGINT_T* impliedEdgeList;
++    ULONGINT_T** auxArr;
++    if (myId == 0) {
++        GPtr->numVertices = maxNumVertices;
++        GPtr->outDegree =
++            (LONGINT_T*)P_MALLOC((GPtr->numVertices) * sizeof(LONGINT_T));
++        assert(GPtr->outDegree);
++        GPtr->outVertexIndex =
++            (ULONGINT_T*)P_MALLOC((GPtr->numVertices) * sizeof(ULONGINT_T));
++        assert(GPtr->outVertexIndex);
++
++        GPtr->numEdges    = numEdgesPlaced;
++        GPtr->intWeight   = SDGdataPtr->intWeight;
++        GPtr->strWeight   = SDGdataPtr->strWeight;
++        for (i = 0; i < numEdgesPlaced; i++) {
++            if (GPtr->intWeight[numEdgesPlaced-i-1] < 0) {
++                GPtr->numStrEdges = -(GPtr->intWeight[numEdgesPlaced-i-1]) + 1;
++                GPtr->numIntEdges = numEdgesPlaced - GPtr->numStrEdges;
++                break;
++            }
++        }
++
++        GPtr->inDegree =
++            (LONGINT_T*)P_MALLOC(GPtr->numVertices * sizeof(LONGINT_T));
++        assert(GPtr->inDegree);
++        GPtr->inVertexIndex =
++            (ULONGINT_T*)P_MALLOC(GPtr->numVertices * sizeof(ULONGINT_T));
++        assert(GPtr->inVertexIndex);
++
++        impliedEdgeList = (ULONGINT_T*)P_MALLOC(GPtr->numVertices
++                                                * MAX_CLUSTER_SIZE
++                                                * sizeof(ULONGINT_T));
++        global_impliedEdgeList = impliedEdgeList;
++
++        auxArr = (ULONGINT_T**)P_MALLOC(GPtr->numVertices * sizeof(ULONGINT_T*));
++        assert(auxArr);
++        global_auxArr = auxArr;
++    }
++#endif
+ 
+     thread_barrier_wait();
++#ifdef CHANGEMALLOCLOCATION
++    impliedEdgeList = global_impliedEdgeList;
++    createPartition(0,
++                    (GPtr->numVertices * MAX_CLUSTER_SIZE),
++                    myId,
++                    numThread,
++                    &i_start,
++                    &i_stop);
+ 
++    for (i = i_start; i < i_stop; i++) {
++        impliedEdgeList[i] = 0;
++    }
++#endif
+     createPartition(0, GPtr->numVertices, myId, numThread, &i_start, &i_stop);
+ 
+     for (i = i_start; i < i_stop; i++) {
+@@ -317,7 +377,12 @@
+         assert(GPtr->paralEdgeIndex);
+         GPtr->outVertexList[0] = SDGdataPtr->endVertex[0];
+     }
+-
++#ifdef CHANGEMALLOCLOCATION
++    for (i = i_start; i < i_stop; i++) {
++        GPtr->inDegree[i] = 0;
++        GPtr->inVertexIndex[i] = 0;
++    }
++#endif
+     thread_barrier_wait();
+ 
+     /*
+@@ -395,6 +460,7 @@
+ 
+     thread_barrier_wait();
+ 
++#ifndef CHANGEMALLOCLOCATION
+     if (myId == 0) {
+         P_FREE(SDGdataPtr->startVertex);
+         P_FREE(SDGdataPtr->endVertex);
+@@ -405,7 +471,6 @@
+             (ULONGINT_T*)P_MALLOC(GPtr->numVertices * sizeof(ULONGINT_T));
+         assert(GPtr->inVertexIndex);
+     }
+-
+     thread_barrier_wait();
+ 
+     for (i = i_start; i < i_stop; i++) {
+@@ -450,13 +515,17 @@
+     }
+ 
+     thread_barrier_wait();
++#endif
+ 
+     auxArr = global_auxArr;
+-
++#ifndef CHANGEMALLOCLOCATION
+     createPartition(0, GPtr->numVertices, myId, numThread, &i_start, &i_stop);
+-
++#endif
+     for (i = i_start; i < i_stop; i++) {
+         /* Inspect adjacency list of vertex i */
++#ifdef CHANGE_TXSIZE
++        TM_BEGIN();
++#endif
+         for (j = GPtr->outVertexIndex[i];
+              j < (GPtr->outVertexIndex[i] + GPtr->outDegree[i]);
+              j++)
+@@ -472,7 +541,9 @@
+                 }
+             }
+             if (k == GPtr->outVertexIndex[v]+GPtr->outDegree[v]) {
++#ifndef CHANGE_TXSIZE
+                 TM_BEGIN();
++#endif
+                 /* Add i to the impliedEdgeList of v */
+                 long inDegree = (long)TM_SHARED_READ(GPtr->inDegree[v]);
+                 TM_SHARED_WRITE(GPtr->inDegree[v], (inDegree + 1));
+@@ -493,9 +564,14 @@
+                     }
+                     TM_SHARED_WRITE(a[inDegree % MAX_CLUSTER_SIZE], i);
+                 }
++#ifndef CHANGE_TXSIZE
+                 TM_END();
++#endif
+             }
+         }
++#ifdef CHANGE_TXSIZE
++        TM_END();
++#endif
+     } /* for i */
+ 
+     thread_barrier_wait();
+@@ -533,6 +609,10 @@
+     thread_barrier_wait();
+ 
+     if (myId == 0) {
++#ifdef CHANGEMALLOCLOCATION
++        P_FREE(SDGdataPtr->startVertex);
++        P_FREE(SDGdataPtr->endVertex);
++#endif
+         P_FREE(impliedEdgeList);
+     }
+ 
+@@ -548,9 +628,541 @@
+         P_FREE(auxArr);
+     }
+ 
++#ifdef DEDUG_DATA
++    if (myId == 0) {
++        FILE *file = fopen("graph_record.txt", "w");
++        if (file == NULL) {
++            perror("Error opening file");
++            return;
++        }
++        fprintf(file, "graph_record\n");
++        fprintf(file, "numVertices:%lu numEdges:%lu numStrEdges:%lu numIntEdges:%lu numDirectedEdges:%lu numUndirectedEdges:%lu\n",
++                GPtr->numVertices, GPtr->numEdges, GPtr->numStrEdges, GPtr->numIntEdges, GPtr->numDirectedEdges, GPtr->numUndirectedEdges);
++        for (i = 0; i < maxNumVertices; i++) {
++            fprintf(file, "outDegree[%lu]:%ld outVertexIndex[%lu]:%lu inDegree[%lu]:%ld inVertexIndex[%lu]:%lu\n",
++                    i, GPtr->outDegree[i], i, GPtr->outVertexIndex[i], i, GPtr->inDegree[i], i, GPtr->inVertexIndex[i]);
++        }
++        for (i = 0; i < outVertexListSize; i++) {
++            fprintf(file, "outVertexList[%lu]:%lu paralEdgeIndex[%lu]:%lu\n",
++                    i, GPtr->outVertexList[i], i, GPtr->paralEdgeIndex[i]);
++        }
++        for (i = 0; i < GPtr->numUndirectedEdges; i++) {
++            fprintf(file, "inVertexList[%lu]:%lu\n", i, GPtr->inVertexList[i]);
++        }
++        fclose(file);
++    }
++#endif
++
+     TM_THREAD_EXIT();
+ }
++#else
++void
++computeGraph (void* argPtr)
++{
++    TM_THREAD_ENTER();
++
++    graph*    GPtr       = ((computeGraph_arg_t*)argPtr)->GPtr;
++    graphSDG* SDGdataPtr = ((computeGraph_arg_t*)argPtr)->SDGdataPtr;
+ 
++    long myId = thread_getId();
++    long numThread = thread_getNumThread();
++
++    ULONGINT_T j;
++    ULONGINT_T maxNumVertices = 0;
++    ULONGINT_T numEdgesPlaced = SDGdataPtr->numEdgesPlaced;
++
++    /*
++     * First determine the number of vertices by scanning the tuple
++     * startVertex list
++     */
++
++    long i;
++    long i_start;
++    long i_stop;
++    if(myId == 0){
++        LOCK_INIT(global_maxNumVertices_lock);
++        LOCK_INIT(global_outVertexListSize_lock);
++    }
++    thread_barrier_wait();
++    
++    createPartition(0, numEdgesPlaced, myId, numThread, &i_start, &i_stop);
++
++    for (i = i_start; i < i_stop; i++) {
++        if (SDGdataPtr->startVertex[i] > maxNumVertices) {
++            maxNumVertices = SDGdataPtr->startVertex[i];
++        }
++    }
++
++    LOCK(global_maxNumVertices_lock);
++    long tmp_maxNumVertices = (long)TM_SHARED_READ(global_maxNumVertices);
++    // long new_maxNumVertices = MAX(tmp_maxNumVertices, maxNumVertices) + 1;
++    long new_maxNumVertices = MAX(tmp_maxNumVertices, maxNumVertices + 1);
++    TM_SHARED_WRITE(global_maxNumVertices, new_maxNumVertices);
++    UNLOCK(global_maxNumVertices_lock);
++    thread_barrier_wait();
++
++    maxNumVertices = global_maxNumVertices;
++#ifndef CHANGEMALLOCLOCATION
++    if (myId == 0) {
++        GPtr->numVertices = maxNumVertices;
++        GPtr->numEdges    = numEdgesPlaced;
++        GPtr->intWeight   = SDGdataPtr->intWeight;
++        GPtr->strWeight   = SDGdataPtr->strWeight;
++
++        for (i = 0; i < numEdgesPlaced; i++) {
++            if (GPtr->intWeight[numEdgesPlaced-i-1] < 0) {
++                GPtr->numStrEdges = -(GPtr->intWeight[numEdgesPlaced-i-1]) + 1;
++                GPtr->numIntEdges = numEdgesPlaced - GPtr->numStrEdges;
++                break;
++            }
++        }
++
++        GPtr->outDegree =
++            (LONGINT_T*)P_MALLOC((GPtr->numVertices) * sizeof(LONGINT_T));
++        assert(GPtr->outDegree);
++
++        GPtr->outVertexIndex =
++            (ULONGINT_T*)P_MALLOC((GPtr->numVertices) * sizeof(ULONGINT_T));
++        assert(GPtr->outVertexIndex);
++    }
++#endif
++#ifdef CHANGEMALLOCLOCATION
++    ULONGINT_T* impliedEdgeList;
++    ULONGINT_T** auxArr;
++    if (myId == 0) {
++        GPtr->numVertices = maxNumVertices;
++        GPtr->outDegree =
++            (LONGINT_T*)P_MALLOC((GPtr->numVertices) * sizeof(LONGINT_T));
++        assert(GPtr->outDegree);
++        GPtr->outVertexIndex =
++            (ULONGINT_T*)P_MALLOC((GPtr->numVertices) * sizeof(ULONGINT_T));
++        assert(GPtr->outVertexIndex);
++
++        GPtr->numEdges    = numEdgesPlaced;
++        GPtr->intWeight   = SDGdataPtr->intWeight;
++        GPtr->strWeight   = SDGdataPtr->strWeight;
++        for (i = 0; i < numEdgesPlaced; i++) {
++            if (GPtr->intWeight[numEdgesPlaced-i-1] < 0) {
++                GPtr->numStrEdges = -(GPtr->intWeight[numEdgesPlaced-i-1]) + 1;
++                GPtr->numIntEdges = numEdgesPlaced - GPtr->numStrEdges;
++                break;
++            }
++        }
++
++        GPtr->inDegree =
++            (LONGINT_T*)P_MALLOC(GPtr->numVertices * sizeof(LONGINT_T));
++        assert(GPtr->inDegree);
++        GPtr->inVertexIndex =
++            (ULONGINT_T*)P_MALLOC(GPtr->numVertices * sizeof(ULONGINT_T));
++        assert(GPtr->inVertexIndex);
++        inDegree_lock =(LOCK_T*)P_MALLOC(GPtr->numVertices * sizeof(LOCK_T));
++        // assert(inDegree_lock);
++        auxArr_lock =(LOCK_T*)P_MALLOC(GPtr->numVertices * sizeof(LOCK_T));
++        assert(inDegree_lock && auxArr_lock);
++        for(i = 0;i < GPtr->numVertices; i++){
++            LOCK_INIT(inDegree_lock[i]);
++            LOCK_INIT(auxArr_lock[i]);
++        }
++
++        impliedEdgeList = (ULONGINT_T*)P_MALLOC(GPtr->numVertices
++                                                * MAX_CLUSTER_SIZE
++                                                * sizeof(ULONGINT_T));
++        global_impliedEdgeList = impliedEdgeList;
++
++        auxArr = (ULONGINT_T**)P_MALLOC(GPtr->numVertices * sizeof(ULONGINT_T*));
++        assert(auxArr);
++        global_auxArr = auxArr;
++    }
++#endif
++
++    thread_barrier_wait();
++#ifdef CHANGEMALLOCLOCATION
++    impliedEdgeList = global_impliedEdgeList;
++    createPartition(0,
++                    (GPtr->numVertices * MAX_CLUSTER_SIZE),
++                    myId,
++                    numThread,
++                    &i_start,
++                    &i_stop);
++
++    for (i = i_start; i < i_stop; i++) {
++        impliedEdgeList[i] = 0;
++    }
++#endif
++    createPartition(0, GPtr->numVertices, myId, numThread, &i_start, &i_stop);
++
++    for (i = i_start; i < i_stop; i++) {
++        GPtr->outDegree[i] = 0;
++        GPtr->outVertexIndex[i] = 0;
++    }
++
++    ULONGINT_T outVertexListSize = 0;
++
++    thread_barrier_wait();
++
++    ULONGINT_T i0 = -1UL;
++
++    for (i = i_start; i < i_stop; i++) {
++
++        ULONGINT_T k = i;
++        if ((outVertexListSize == 0) && (k != 0)) {
++            while (i0 == -1UL) {
++                for (j = 0; j < numEdgesPlaced; j++) {
++                    if (k == SDGdataPtr->startVertex[j]) {
++                        i0 = j;
++                        break;
++                    }
++
++                }
++                k--;
++            }
++        }
++
++        if ((outVertexListSize == 0) && (k == 0)) {
++            i0 = 0;
++        }
++
++        for (j = i0; j < numEdgesPlaced; j++) {
++            if (i == GPtr->numVertices-1) {
++                break;
++            }
++            if ((i != SDGdataPtr->startVertex[j])) {
++                if ((j > 0) && (i == SDGdataPtr->startVertex[j-1])) {
++                    if (j-i0 >= 1) {
++                        outVertexListSize++;
++                        GPtr->outDegree[i]++;
++                        ULONGINT_T t;
++                        for (t = i0+1; t < j; t++) {
++                            if (SDGdataPtr->endVertex[t] !=
++                                SDGdataPtr->endVertex[t-1])
++                            {
++                                outVertexListSize++;
++                                GPtr->outDegree[i] = GPtr->outDegree[i]+1;
++                            }
++                        }
++                    }
++                }
++                i0 = j;
++                break;
++            }
++        }
++
++        if (i == GPtr->numVertices-1) {
++            if (numEdgesPlaced-i0 >= 0) {
++                outVertexListSize++;
++                GPtr->outDegree[i]++;
++                ULONGINT_T t;
++                for (t = i0+1; t < numEdgesPlaced; t++) {
++                    if (SDGdataPtr->endVertex[t] != SDGdataPtr->endVertex[t-1]) {
++                        outVertexListSize++;
++                        GPtr->outDegree[i]++;
++                    }
++                }
++            }
++        }
++
++    } /* for i */
++
++    thread_barrier_wait();
++
++    prefix_sums(GPtr->outVertexIndex, GPtr->outDegree, GPtr->numVertices);
++
++    thread_barrier_wait();
++
++    LOCK(global_outVertexListSize_lock);
++    TM_SHARED_WRITE(
++        global_outVertexListSize,
++        ((long)TM_SHARED_READ(global_outVertexListSize) + outVertexListSize)
++    );
++    UNLOCK(global_outVertexListSize_lock);
++
++    thread_barrier_wait();
++
++    outVertexListSize = global_outVertexListSize;
++
++    if (myId == 0) {
++        GPtr->numDirectedEdges = outVertexListSize;
++        GPtr->outVertexList =
++            (ULONGINT_T*)P_MALLOC(outVertexListSize * sizeof(ULONGINT_T));
++        assert(GPtr->outVertexList);
++        GPtr->paralEdgeIndex =
++            (ULONGINT_T*)P_MALLOC(outVertexListSize * sizeof(ULONGINT_T));
++        assert(GPtr->paralEdgeIndex);
++        GPtr->outVertexList[0] = SDGdataPtr->endVertex[0];
++    }
++#ifdef CHANGEMALLOCLOCATION
++    for (i = i_start; i < i_stop; i++) {
++        GPtr->inDegree[i] = 0;
++        GPtr->inVertexIndex[i] = 0;
++    }
++#endif
++    thread_barrier_wait();
++
++    /*
++     * Evaluate outVertexList
++     */
++
++    i0 = -1UL;
++
++    for (i = i_start; i < i_stop; i++) {
++
++        ULONGINT_T k = i;
++        while ((i0 == -1UL) && (k != 0)) {
++            for (j = 0; j < numEdgesPlaced; j++) {
++                if (k == SDGdataPtr->startVertex[j]) {
++                    i0 = j;
++                    break;
++                }
++            }
++            k--;
++        }
++
++        if ((i0 == -1) && (k == 0)) {
++            i0 = 0;
++        }
++
++        for (j = i0; j < numEdgesPlaced; j++) {
++            if (i == GPtr->numVertices-1) {
++                break;
++            }
++            if (i != SDGdataPtr->startVertex[j]) {
++                if ((j > 0) && (i == SDGdataPtr->startVertex[j-1])) {
++                    if (j-i0 >= 1) {
++                        long ii = GPtr->outVertexIndex[i];
++                        ULONGINT_T r = 0;
++                        GPtr->paralEdgeIndex[ii] = i0;
++                        GPtr->outVertexList[ii] = SDGdataPtr->endVertex[i0];
++                        r++;
++                        ULONGINT_T t;
++                        for (t = i0+1; t < j; t++) {
++                            if (SDGdataPtr->endVertex[t] !=
++                                SDGdataPtr->endVertex[t-1])
++                            {
++                                GPtr->paralEdgeIndex[ii+r] = t;
++                                GPtr->outVertexList[ii+r] = SDGdataPtr->endVertex[t];
++                                r++;
++                            }
++                        }
++
++                    }
++                }
++                i0 = j;
++                break;
++            }
++        } /* for j */
++
++        if (i == GPtr->numVertices-1) {
++            ULONGINT_T r = 0;
++            if (numEdgesPlaced-i0 >= 0) {
++                long ii = GPtr->outVertexIndex[i];
++                GPtr->paralEdgeIndex[ii+r] = i0;
++                GPtr->outVertexList[ii+r] = SDGdataPtr->endVertex[i0];
++                r++;
++                ULONGINT_T t;
++                for (t = i0+1; t < numEdgesPlaced; t++) {
++                    if (SDGdataPtr->endVertex[t] != SDGdataPtr->endVertex[t-1]) {
++                        GPtr->paralEdgeIndex[ii+r] = t;
++                        GPtr->outVertexList[ii+r] = SDGdataPtr->endVertex[t];
++                        r++;
++                    }
++                }
++            }
++        }
++
++    } /* for i */
++
++    thread_barrier_wait();
++
++#ifndef CHANGEMALLOCLOCATION
++    if (myId == 0) {
++        P_FREE(SDGdataPtr->startVertex);
++        P_FREE(SDGdataPtr->endVertex);
++        GPtr->inDegree =
++            (LONGINT_T*)P_MALLOC(GPtr->numVertices * sizeof(LONGINT_T));
++        assert(GPtr->inDegree);
++        GPtr->inVertexIndex =
++            (ULONGINT_T*)P_MALLOC(GPtr->numVertices * sizeof(ULONGINT_T));
++        assert(GPtr->inVertexIndex);
++    }
++    thread_barrier_wait();
++
++    for (i = i_start; i < i_stop; i++) {
++        GPtr->inDegree[i] = 0;
++        GPtr->inVertexIndex[i] = 0;
++    }
++
++    /* A temp. array to store the inplied edges */
++    ULONGINT_T* impliedEdgeList;
++    if (myId == 0) {
++        impliedEdgeList = (ULONGINT_T*)P_MALLOC(GPtr->numVertices
++                                                * MAX_CLUSTER_SIZE
++                                                * sizeof(ULONGINT_T));
++        global_impliedEdgeList = impliedEdgeList;
++    }
++
++    thread_barrier_wait();
++
++    impliedEdgeList = global_impliedEdgeList;
++
++    createPartition(0,
++                    (GPtr->numVertices * MAX_CLUSTER_SIZE),
++                    myId,
++                    numThread,
++                    &i_start,
++                    &i_stop);
++
++    for (i = i_start; i < i_stop; i++) {
++        impliedEdgeList[i] = 0;
++    }
++
++    /*
++     * An auxiliary array to store implied edges, in case we overshoot
++     * MAX_CLUSTER_SIZE
++     */
++
++    ULONGINT_T** auxArr;
++    if (myId == 0) {
++        auxArr = (ULONGINT_T**)P_MALLOC(GPtr->numVertices * sizeof(ULONGINT_T*));
++        assert(auxArr);
++        global_auxArr = auxArr;
++    }
++
++    thread_barrier_wait();
++#endif
++
++    auxArr = global_auxArr;
++#ifndef CHANGEMALLOCLOCATION
++    createPartition(0, GPtr->numVertices, myId, numThread, &i_start, &i_stop);
++#endif
++    for (i = i_start; i < i_stop; i++) {
++        /* Inspect adjacency list of vertex i */
++        for (j = GPtr->outVertexIndex[i];
++             j < (GPtr->outVertexIndex[i] + GPtr->outDegree[i]);
++             j++)
++        {
++            ULONGINT_T v = GPtr->outVertexList[j];
++            ULONGINT_T k;
++            for (k = GPtr->outVertexIndex[v];
++                 k < (GPtr->outVertexIndex[v] + GPtr->outDegree[v]);
++                 k++)
++            {
++                if (GPtr->outVertexList[k] == i) {
++                    break;
++                }
++            }
++            if (k == GPtr->outVertexIndex[v]+GPtr->outDegree[v]) {
++                LOCK(inDegree_lock[v]);
++                /* Add i to the impliedEdgeList of v */
++                long inDegree = (long)TM_SHARED_READ(GPtr->inDegree[v]);
++                TM_SHARED_WRITE(GPtr->inDegree[v], (inDegree + 1));
++                if (inDegree < MAX_CLUSTER_SIZE) {
++                    TM_SHARED_WRITE(impliedEdgeList[v*MAX_CLUSTER_SIZE+inDegree],
++                                    i);
++                    UNLOCK(inDegree_lock[v]);
++                } else {
++                    /* Use auxiliary array to store the implied edge */
++                    /* Create an array if it's not present already */
++                    LOCK(auxArr_lock[v]);
++                    UNLOCK(inDegree_lock[v]);
++                    ULONGINT_T* a = NULL;
++                    if ((inDegree % MAX_CLUSTER_SIZE) == 0) {
++                        a = (ULONGINT_T*)TM_MALLOC(MAX_CLUSTER_SIZE
++                                                   * sizeof(ULONGINT_T));
++                        assert(a);
++                        TM_SHARED_WRITE_P(auxArr[v], a);
++                    } else {
++                        a = auxArr[v];
++                    }
++                    TM_SHARED_WRITE(a[inDegree % MAX_CLUSTER_SIZE], i);
++                    UNLOCK(auxArr_lock[v]);
++                    // UNLOCK(inDegree_lock[v]);
++                }
++            }
++        }
++    } /* for i */
++
++    thread_barrier_wait();
++
++    prefix_sums(GPtr->inVertexIndex, GPtr->inDegree, GPtr->numVertices);
++
++    if (myId == 0) {
++        GPtr->numUndirectedEdges = GPtr->inVertexIndex[GPtr->numVertices-1]
++                                   + GPtr->inDegree[GPtr->numVertices-1];
++        GPtr->inVertexList =
++            (ULONGINT_T *)P_MALLOC(GPtr->numUndirectedEdges * sizeof(ULONGINT_T));
++    }
++
++    thread_barrier_wait();
++
++    /*
++     * Create the inVertex List
++     */
++
++    for (i = i_start; i < i_stop; i++) {
++        for (j = GPtr->inVertexIndex[i];
++             j < (GPtr->inVertexIndex[i] + GPtr->inDegree[i]);
++             j++)
++        {
++            if ((j - GPtr->inVertexIndex[i]) < MAX_CLUSTER_SIZE) {
++                GPtr->inVertexList[j] =
++                    impliedEdgeList[i*MAX_CLUSTER_SIZE+j-GPtr->inVertexIndex[i]];
++            } else {
++                GPtr->inVertexList[j] =
++                    auxArr[i][(j-GPtr->inVertexIndex[i]) % MAX_CLUSTER_SIZE];
++            }
++        }
++    }
++
++    thread_barrier_wait();
++
++    if (myId == 0) {
++#ifdef CHANGEMALLOCLOCATION
++        P_FREE(SDGdataPtr->startVertex);
++        P_FREE(SDGdataPtr->endVertex);
++#endif
++        P_FREE(impliedEdgeList);
++    }
++
++    for (i = i_start; i < i_stop; i++) {
++        if (GPtr->inDegree[i] > MAX_CLUSTER_SIZE) {
++            P_FREE(auxArr[i]);
++        }
++    }
++
++    thread_barrier_wait();
++
++    if (myId == 0) {
++        P_FREE(auxArr);
++    }
++
++#ifdef DEDUG_DATA
++    if (myId == 0) {
++        FILE *file = fopen("graph_record.txt", "w");
++        if (file == NULL) {
++            perror("Error opening file");
++            return;
++        }
++        fprintf(file, "graph_record\n");
++        fprintf(file, "numVertices:%lu numEdges:%lu numStrEdges:%lu numIntEdges:%lu numDirectedEdges:%lu numUndirectedEdges:%lu\n",
++                GPtr->numVertices, GPtr->numEdges, GPtr->numStrEdges, GPtr->numIntEdges, GPtr->numDirectedEdges, GPtr->numUndirectedEdges);
++        for (i = 0; i < maxNumVertices; i++) {
++            fprintf(file, "outDegree[%lu]:%ld outVertexIndex[%lu]:%lu inDegree[%lu]:%ld inVertexIndex[%lu]:%lu\n",
++                    i, GPtr->outDegree[i], i, GPtr->outVertexIndex[i], i, GPtr->inDegree[i], i, GPtr->inVertexIndex[i]);
++        }
++        for (i = 0; i < outVertexListSize; i++) {
++            fprintf(file, "outVertexList[%lu]:%lu paralEdgeIndex[%lu]:%lu\n",
++                    i, GPtr->outVertexList[i], i, GPtr->paralEdgeIndex[i]);
++        }
++        for (i = 0; i < GPtr->numUndirectedEdges; i++) {
++            fprintf(file, "inVertexList[%lu]:%lu\n", i, GPtr->inVertexList[i]);
++        }
++        fclose(file);
++    }
++#endif
++
++    TM_THREAD_EXIT();
++}
++#endif
+ 
+ /* =============================================================================
+  *
+diff -ruN -X /tmp/exc master/stamp/ssca2/cutClusters.c pandora-supplement/ssca2/cutClusters.c
+--- master/stamp/ssca2/cutClusters.c	2014-11-29 12:36:52.000000000 +0900
++++ pandora-supplement/ssca2/cutClusters.c	2024-11-22 07:21:33.000000000 +0900
+@@ -90,7 +90,10 @@
+ static long       global_iter;
+ static ULONGINT_T global_cliqueSize = 0;
+ static ULONGINT_T global_cutSetIndex = 0;
+-
++#ifdef FINE_LOCK
++LOCK_T global_cliqueSize_lock;
++LOCK_T global_cutSetIndex_lock;
++#endif
+ 
+ /* =============================================================================
+  * cutClusters
+@@ -129,6 +132,10 @@
+         neighbourArraySorted = (ULONGINT_T*)P_MALLOC(numByte);
+         assert(neighbourArraySorted);
+         global_neighbourArraySorted = neighbourArraySorted;
++#ifdef FINE_LOCK
++        LOCK_INIT(global_cliqueSize_lock);
++        LOCK_INIT(global_cutSetIndex_lock);
++#endif
+     }
+ 
+     thread_barrier_wait();
+@@ -183,16 +190,22 @@
+          * Allocate mem. for the cut set list
+          * Maintain local arrays initially and merge them in the end
+          */
+-
++#ifdef ORIGINAL_pCutSet
+         if (SCALE < 12) {
+             pCutSet =(edge*)P_MALLOC((1*(GPtr->numDirectedEdges)/numThread)
+                                      * sizeof(edge));
+         } else {
++#ifndef ORIGINAL
++            pCutSet = (edge*)P_MALLOC(((GPtr->numDirectedEdges)/numThread)
++                                      * sizeof(edge));
++#else
+             pCutSet = (edge*)P_MALLOC((0.2*(GPtr->numDirectedEdges)/numThread)
+                                       * sizeof(edge));
++#endif
+         }
+         assert(pCutSet);
+         global_pCutSet = pCutSet;
++#endif
+ 
+         /*
+          * Vertex to start from, on each thread
+@@ -206,9 +219,22 @@
+     }
+ 
+     thread_barrier_wait();
+-
++#ifndef ORIGINAL_pCutSet
++    if (SCALE < 12) {
++        pCutSet =(edge*)P_MALLOC((1*(GPtr->numDirectedEdges)/numThread)
++                                 * sizeof(edge));
++    } else {
++        // pCutSet = (edge*)P_MALLOC((0.2*(GPtr->numDirectedEdges)/numThread)
++        //                           * sizeof(edge));
++        pCutSet = (edge*)P_MALLOC((1*(GPtr->numDirectedEdges)/numThread)
++                                  * sizeof(edge));
++    }
++    assert(pCutSet);
++#endif
+     vStatus     = global_vStatus;
++#ifdef ORIGINAL_pCutSet
+     pCutSet     = global_pCutSet;
++#endif
+     startV      = global_startV;
+     clusterSize = global_clusterSize;
+ 
+@@ -528,12 +554,17 @@
+             iter++;
+             global_iter = iter;
+         }
+-
++#ifndef FINE_LOCK
+         TM_BEGIN();
+         long tmp_cliqueSize = (long)TM_SHARED_READ(global_cliqueSize);
+         TM_SHARED_WRITE(global_cliqueSize, (tmp_cliqueSize + cliqueSize));
+         TM_END();
+-
++#else
++        LOCK(global_cliqueSize_lock);
++        long tmp_cliqueSize = (long)TM_SHARED_READ(global_cliqueSize);
++        TM_SHARED_WRITE(global_cliqueSize, (tmp_cliqueSize + cliqueSize));
++        UNLOCK(global_cliqueSize_lock);
++#endif
+         thread_barrier_wait();
+ 
+         iter = global_iter;
+@@ -600,12 +631,17 @@
+             edgeStartCounter[t] = edgeEndCounter[t-1];
+         }
+     }
+-
++#ifndef FINE_LOCK
+     TM_BEGIN();
+     long tmp_cutSetIndex = (long)TM_SHARED_READ(global_cutSetIndex);
+     TM_SHARED_WRITE(global_cutSetIndex, (tmp_cutSetIndex + cutSetIndex));
+     TM_END();
+-
++#else
++    LOCK(global_cutSetIndex_lock);
++    long tmp_cutSetIndex = (long)TM_SHARED_READ(global_cutSetIndex);
++    TM_SHARED_WRITE(global_cutSetIndex, (tmp_cutSetIndex + cutSetIndex));
++    UNLOCK(global_cutSetIndex_lock);
++#endif
+     thread_barrier_wait();
+ 
+     cutSetIndex = global_cutSetIndex;
+diff -ruN -X /tmp/exc master/stamp/ssca2/genScalData.c pandora-supplement/ssca2/genScalData.c
+--- master/stamp/ssca2/genScalData.c	2014-11-29 12:36:52.000000000 +0900
++++ pandora-supplement/ssca2/genScalData.c	2024-11-22 07:21:33.000000000 +0900
+@@ -90,7 +90,14 @@
+ static ULONGINT_T* global_startVertex        = NULL;
+ static ULONGINT_T* global_endVertex          = NULL;
+ static ULONGINT_T* global_tempIndex          = NULL;
+-
++#ifdef USE_PARALLEL_DATA_GENERATION
++#ifdef FINE_LOCK
++// LOCK_T perm_lock;
++LOCK_T* permV_locks;
++LOCK_T global_edgeNum_lock;
++LOCK_T global_numStrWtEdges_lock;
++#endif
++#endif
+ 
+ /* =============================================================================
+  * genScalData_seq
+@@ -108,7 +115,7 @@
+     random_seed(stream, 0);
+ 
+     ULONGINT_T* permV; /* the vars associated with the graph tuple */
+-    permV = (ULONGINT_T*)malloc(TOT_VERTICES * sizeof(ULONGINT_T));
++    permV = (ULONGINT_T*)P_MALLOC(TOT_VERTICES * sizeof(ULONGINT_T));
+     assert(permV);
+ 
+     long i;
+@@ -120,6 +127,7 @@
+ 
+     for (i = 0; i < TOT_VERTICES; i++) {
+         long t1 = random_generate(stream);
++        // printf("t1[%d] =%lu\n",i,t1);
+         long t = i + t1 % (TOT_VERTICES - i);
+         if (t != i) {
+             ULONGINT_T t2 = permV[t];
+@@ -140,13 +148,14 @@
+      * Allocate mem for Clique array
+      * Estimate number of clique required and pad by 50%
+      */
+-    cliqueSizes = (long*)malloc(estTotCliques * sizeof(long));
++    cliqueSizes = (long*)P_MALLOC(estTotCliques * sizeof(long));
+     assert(cliqueSizes);
+ 
+ 
+     /* Generate random clique sizes. */
+     for (i = 0; i < estTotCliques; i++) {
+         cliqueSizes[i] = 1 + (random_generate(stream) % MAX_CLIQUE_SIZE);
++        // printf("cliqueSizes[%d] =%lu\n",i,cliqueSizes[i]);
+     }
+ 
+     long totCliques = 0;
+@@ -158,9 +167,9 @@
+     ULONGINT_T* lastVsInCliques;
+     ULONGINT_T* firstVsInCliques;
+ 
+-    lastVsInCliques = (ULONGINT_T*)malloc(estTotCliques * sizeof(ULONGINT_T));
++    lastVsInCliques = (ULONGINT_T*)P_MALLOC(estTotCliques * sizeof(ULONGINT_T));
+     assert(lastVsInCliques);
+-    firstVsInCliques = (ULONGINT_T*)malloc(estTotCliques * sizeof(ULONGINT_T));
++    firstVsInCliques = (ULONGINT_T*)P_MALLOC(estTotCliques * sizeof(ULONGINT_T));
+     assert(firstVsInCliques);
+ 
+     /*
+@@ -236,8 +245,8 @@
+     ULONGINT_T* startV;
+     ULONGINT_T* endV;
+     long numByte = (estTotEdges) * sizeof(ULONGINT_T);
+-    startV = (ULONGINT_T*)malloc(numByte);
+-    endV = (ULONGINT_T*)malloc(numByte);
++    startV = (ULONGINT_T*)P_MALLOC(numByte);
++    endV = (ULONGINT_T*)P_MALLOC(numByte);
+     assert(startV);
+     assert(endV);
+ 
+@@ -245,11 +254,11 @@
+      * Tmp array to keep track of the no. of parallel edges in each direction
+      */
+     ULONGINT_T** tmpEdgeCounter =
+-        (ULONGINT_T**)malloc(MAX_CLIQUE_SIZE * sizeof(ULONGINT_T *));
++        (ULONGINT_T**)P_MALLOC(MAX_CLIQUE_SIZE * sizeof(ULONGINT_T *));
+     assert(tmpEdgeCounter);
+     for (i = 0; i < MAX_CLIQUE_SIZE; i++) {
+         tmpEdgeCounter[i] =
+-            (ULONGINT_T*)malloc(MAX_CLIQUE_SIZE * sizeof(ULONGINT_T));
++            (ULONGINT_T*)P_MALLOC(MAX_CLIQUE_SIZE * sizeof(ULONGINT_T));
+         assert(tmpEdgeCounter[i]);
+     }
+ 
+@@ -277,6 +286,7 @@
+             for (j = 0; j < i; j++) {
+ 
+                 float r = (float)(random_generate(stream) % 1000) / (float)1000;
++                // printf("r =%f\n",r);
+                 if (r >= p) {
+ 
+                     startV[i_edgePtr] = i + i_firstVsInClique;
+@@ -313,6 +323,7 @@
+         if (i_cliqueSize != 1) {
+             long randNumEdges = (long)(random_generate(stream)
+                                        % (2*i_cliqueSize*MAX_PARAL_EDGES));
++            // printf("randNumEdge =%ld\n",randNumEdges);
+             long i_paralEdge;
+             for (i_paralEdge = 0; i_paralEdge < randNumEdges; i_paralEdge++) {
+                 i = (random_generate(stream) % i_cliqueSize);
+@@ -333,10 +344,10 @@
+     } /* for i_clique */
+ 
+     for (i = 0; i < MAX_CLIQUE_SIZE; i++) {
+-        free(tmpEdgeCounter[i]);
++        P_FREE(tmpEdgeCounter[i]);
+     }
+ 
+-    free(tmpEdgeCounter);
++    P_FREE(tmpEdgeCounter);
+ 
+ 
+     /*
+@@ -356,13 +367,13 @@
+ 
+     if (SCALE < 10) {
+         long numByte = 2 * edgeNum * sizeof(ULONGINT_T);
+-        startVertex = (ULONGINT_T*)malloc(numByte);
+-        endVertex = (ULONGINT_T*)malloc(numByte);
++        startVertex = (ULONGINT_T*)P_MALLOC(numByte);
++        endVertex = (ULONGINT_T*)P_MALLOC(numByte);
+     } else {
+         long numByte = (edgeNum + MAX_PARAL_EDGES * TOT_VERTICES)
+                        * sizeof(ULONGINT_T);
+-        startVertex = (ULONGINT_T*)malloc(numByte);
+-        endVertex = (ULONGINT_T*)malloc(numByte);
++        startVertex = (ULONGINT_T*)P_MALLOC(numByte);
++        endVertex = (ULONGINT_T*)P_MALLOC(numByte);
+     }
+     assert(startVertex);
+     assert(endVertex);
+@@ -547,19 +558,19 @@
+     printf("No. of inter-clique edges - %lu\n", numEdgesPlacedOutside);
+     printf("Total no. of edges        - %lu\n", numEdgesPlaced);
+ 
+-    free(cliqueSizes);
+-    free(firstVsInCliques);
+-    free(lastVsInCliques);
++    P_FREE(cliqueSizes);
++    P_FREE(firstVsInCliques);
++    P_FREE(lastVsInCliques);
+ 
+-    free(startV);
+-    free(endV);
++    P_FREE(startV);
++    P_FREE(endV);
+ 
+     /*
+      * STEP 4: Generate edge weights
+      */
+ 
+     SDGdataPtr->intWeight =
+-        (LONGINT_T*)malloc(numEdgesPlaced * sizeof(LONGINT_T));
++        (LONGINT_T*)P_MALLOC(numEdgesPlaced * sizeof(LONGINT_T));
+     assert(SDGdataPtr->intWeight);
+ 
+     p = PERC_INT_WEIGHTS;
+@@ -585,7 +596,7 @@
+     }
+ 
+     SDGdataPtr->strWeight =
+-        (char*)malloc(numStrWtEdges * MAX_STRLEN * sizeof(char));
++        (char*)P_MALLOC(numStrWtEdges * MAX_STRLEN * sizeof(char));
+     assert(SDGdataPtr->strWeight);
+ 
+     for (i = 0; i < numEdgesPlaced; i++) {
+@@ -603,7 +614,7 @@
+      */
+ 
+     if (strlen(SOUGHT_STRING) != MAX_STRLEN) {
+-        SOUGHT_STRING = (char*)malloc(MAX_STRLEN * sizeof(char));
++        SOUGHT_STRING = (char*)P_MALLOC(MAX_STRLEN * sizeof(char));
+         assert(SOUGHT_STRING);
+     }
+ 
+@@ -632,9 +643,9 @@
+      */
+ 
+     numByte = numEdgesPlaced * sizeof(ULONGINT_T);
+-    SDGdataPtr->startVertex = (ULONGINT_T*)malloc(numByte);
++    SDGdataPtr->startVertex = (ULONGINT_T*)P_MALLOC(numByte);
+     assert(SDGdataPtr->startVertex);
+-    SDGdataPtr->endVertex = (ULONGINT_T*)malloc(numByte);
++    SDGdataPtr->endVertex = (ULONGINT_T*)P_MALLOC(numByte);
+     assert(SDGdataPtr->endVertex);
+ 
+     all_radixsort_node_aux_s3_seq(numEdgesPlaced,
+@@ -643,8 +654,8 @@
+                                   endVertex,
+                                   SDGdataPtr->endVertex);
+ 
+-    free(startVertex);
+-    free(endVertex);
++    P_FREE(startVertex);
++    P_FREE(endVertex);
+ 
+     if (SCALE < 12) {
+ 
+@@ -704,7 +715,7 @@
+     } else {
+ 
+         ULONGINT_T* tempIndex =
+-            (ULONGINT_T*)malloc((TOT_VERTICES + 1) * sizeof(ULONGINT_T));
++            (ULONGINT_T*)P_MALLOC((TOT_VERTICES + 1) * sizeof(ULONGINT_T));
+ 
+         /*
+          * Update degree of each vertex
+@@ -749,12 +760,19 @@
+             }
+         }
+ 
+-       free(tempIndex);
++       P_FREE(tempIndex);
+ 
+     } /* SCALE >= 12 */
+-
++#ifdef DATA_CHEACK
++        FILE* outfp = fopen("cliques.txt", "w");
++        fprintf(outfp, "No. of cliques - %lu\n", totCliques);
++    for (i = 0; i < numEdgesPlaced; i++) {
++        fprintf(outfp,"startVertex[%d]=%lu,endVertex[%d]=%lu\n",i,SDGdataPtr->startVertex[i],i,SDGdataPtr->endVertex[i]);
++    }
++        fclose(outfp);
++#endif
+     random_free(stream);
+-    free(permV);
++    P_FREE(permV);
+ }
+ 
+ 
+@@ -762,6 +780,7 @@
+  * genScalData
+  * =============================================================================
+  */
++#ifdef USE_PARALLEL_DATA_GENERATION
+ void
+ genScalData (void* argPtr)
+ {
+@@ -782,19 +801,30 @@
+ 
+     ULONGINT_T* permV; /* the vars associated with the graph tuple */
+ 
++    long i;
++    long i_start;
++    long i_stop;
++
+     if (myId == 0) {
+         permV = (ULONGINT_T*)P_MALLOC(TOT_VERTICES * sizeof(ULONGINT_T));
+         assert(permV);
+         global_permV = permV;
++// #ifdef USE_PARALLEL_DATA_GENERATION
++#ifdef FINE_LOCK
++        permV_locks = (LOCK_T*) P_MALLOC (TOT_VERTICES * sizeof(LOCK_T));
++        for (i = 0; i < TOT_VERTICES; i++) {
++            LOCK_INIT(permV_locks[i]);
++        }
++        // LOCK_INIT(perm_lock);
++        LOCK_INIT(global_edgeNum_lock);
++        LOCK_INIT(global_numStrWtEdges_lock);
++#endif
++// #endif
+     }
+ 
+     thread_barrier_wait();
+ 
+     permV = global_permV;
+-
+-    long i;
+-    long i_start;
+-    long i_stop;
+     createPartition(0, TOT_VERTICES, myId, numThread, &i_start, &i_stop);
+ 
+     /* Initialize the array */
+@@ -808,11 +838,34 @@
+         long t1 = PRANDOM_GENERATE(stream);
+         long t = i + t1 % (TOT_VERTICES - i);
+         if (t != i) {
++            // printf("i:%lu,t:%lu\n",i,t);
++// #ifdef USE_PARALLEL_DATA_GENERATION
++#ifndef FINE_LOCK
+             TM_BEGIN();
+             long t2 = (long)TM_SHARED_READ(permV[t]);
+             TM_SHARED_WRITE(permV[t], TM_SHARED_READ(permV[i]));
+             TM_SHARED_WRITE(permV[i], t2);
+             TM_END();
++#else
++            // LOCK(perm_lock);
++            // long t2 = (long)TM_SHARED_READ(permV[t]);
++            // TM_SHARED_WRITE(permV[t], TM_SHARED_READ(permV[i]));
++            // TM_SHARED_WRITE(permV[i], t2);
++            // UNLOCK(perm_lock);
++            if (i < t) {
++                LOCK(permV_locks[i]);
++                LOCK(permV_locks[t]);
++            } else {
++                LOCK(permV_locks[t]);
++                LOCK(permV_locks[i]);
++            }
++            long t2 = (long)TM_SHARED_READ(permV[t]);
++            TM_SHARED_WRITE(permV[t], TM_SHARED_READ(permV[i]));
++            TM_SHARED_WRITE(permV[i], t2);
++            UNLOCK(permV_locks[i]);
++            UNLOCK(permV_locks[t]);
++#endif
++// #endif
+         }
+     }
+ 
+@@ -1096,10 +1149,19 @@
+         }
+     }
+ 
++// #ifdef USE_PARALLEL_DATA_GENERATION
++#ifndef FINE_LOCK
+     TM_BEGIN();
+     TM_SHARED_WRITE(global_edgeNum,
+                     ((long)TM_SHARED_READ(global_edgeNum) + i_edgePtr));
+     TM_END();
++#else
++    LOCK(global_edgeNum_lock);
++    TM_SHARED_WRITE(global_edgeNum,
++                    ((long)TM_SHARED_READ(global_edgeNum) + i_edgePtr));
++    UNLOCK(global_edgeNum_lock);
++#endif
++// #endif
+ 
+     thread_barrier_wait();
+ 
+@@ -1314,11 +1376,19 @@
+         }
+     }
+ 
++// #ifdef USE_PARALLEL_DATA_GENERATION
++#ifndef FINE_LOCK
+     TM_BEGIN();
+     TM_SHARED_WRITE(global_edgeNum,
+                     ((long)TM_SHARED_READ(global_edgeNum) + i_edgePtr));
+     TM_END();
+-
++#else
++    LOCK(global_edgeNum_lock);
++    TM_SHARED_WRITE(global_edgeNum,
++                    ((long)TM_SHARED_READ(global_edgeNum) + i_edgePtr));
++    UNLOCK(global_edgeNum_lock);
++#endif
++// #endif
+ 
+     thread_barrier_wait();
+ 
+@@ -1395,12 +1465,19 @@
+             }
+         }
+     }
+-
++// #ifdef USE_PARALLEL_DATA_GENERATION
++#ifndef FINE_LOCK
+     TM_BEGIN();
+     TM_SHARED_WRITE(global_numStrWtEdges,
+                     ((long)TM_SHARED_READ(global_numStrWtEdges) + numStrWtEdges));
+     TM_END();
+-
++#else
++    LOCK(global_numStrWtEdges_lock);
++    TM_SHARED_WRITE(global_numStrWtEdges,
++                    ((long)TM_SHARED_READ(global_numStrWtEdges) + numStrWtEdges));
++    UNLOCK(global_numStrWtEdges_lock);
++#endif
++// #endif
+     thread_barrier_wait();
+ 
+     numStrWtEdges = global_numStrWtEdges;
+@@ -1644,6 +1721,7 @@
+ 
+     TM_THREAD_EXIT();
+ }
++#endif
+ 
+ 
+ /* =============================================================================

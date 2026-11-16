@@ -1,0 +1,11 @@
+--- gperftools-2.13/src/common.h	2023-08-10 12:46:13.000000000 +0900
++++ gperftools-2.13/src/common.h	2026-11-02 11:32:46.704756752 +0900
+@@ -278,7 +278,7 @@
+   // it too big may temporarily cause unnecessary memory wastage in the
+   // per-thread free list until the scavenger cleans up the list.
+   int num_objects_to_move(uint32 cl) {
+-    return num_objects_to_move_[cl];
++    return num_objects_to_move_[cl]*8;
+   }
+ 
+   // Smallest Span size in bytes (max of system's page size and

@@ -1,0 +1,16 @@
+*.o
+*.a
+common/Makefile
+lib/tm.h
+genome/genome
+intruder/intruder
+kmeans/kmeans
+labyrinth/labyrinth
+ssca2/ssca2
+swissTM/intset-rbtree
+swissTM/rbforest
+swissTM/target/obj/intset-rbtree
+swissTM/target/obj/rbforest
+vacation/vacation
+yada/yada
+build

@@ -1,0 +1,615 @@
+diff -ruN -X /tmp/exc master/stamp/yada/element.c pandora-supplement/yada/element.c
+--- master/stamp/yada/element.c	2014-11-29 12:36:52.000000000 +0900
++++ pandora-supplement/yada/element.c	2025-04-25 07:44:36.000000000 +0900
+@@ -367,6 +367,18 @@
+ }
+ 
+ 
++ulong_t element_mapHash(void* voidPtr) {
++    element_t* elementPtr = (element_t*) voidPtr;
++    ulong_t r = 0;
++    for (int i = 0; i < elementPtr->numCoordinate; ++i) {
++        union { double as_double; long as_long; } xcaster = { elementPtr->coordinates[i].x };
++        union { double as_double; long as_long; } ycaster = { elementPtr->coordinates[i].y };
++        r += xcaster.as_long + ycaster.as_long;
++    }
++    return r;
++}
++
++
+ /* =============================================================================
+  * element_alloc
+  *
+@@ -378,7 +390,7 @@
+ {
+     element_t* elementPtr;
+ 
+-    elementPtr = (element_t*)malloc(sizeof(element_t));
++    elementPtr = (element_t*)P_MALLOC(sizeof(element_t));
+     if (elementPtr) {
+         long i;
+         for (i = 0; i < numCoordinate; i++) {
+@@ -471,7 +483,7 @@
+ element_free (element_t* elementPtr)
+ {
+     list_free(elementPtr->neighborListPtr);
+-    free(elementPtr);
++    P_FREE(elementPtr);
+ }
+ 
+ 
+@@ -560,6 +572,20 @@
+ }
+ 
+ 
++ulong_t element_mapHashEdge(void* voidPtr) {
++    edge_t* edgePtr = (edge_t*) voidPtr;
++    coordinate_t* first = (coordinate_t*) edgePtr->firstPtr;
++    coordinate_t* second = (coordinate_t*) edgePtr->secondPtr;
++    ulong_t r = 0;
++    union { double as_double; long as_long; } firstx = { first->x };
++    union { double as_double; long as_long; } firsty = { first->y };
++    union { double as_double; long as_long; } secondx = { second->x };
++    union { double as_double; long as_long; } secondy = { second->y };
++    r += firstx.as_long + firsty.as_long + secondx.as_long + secondy.as_long;
++    return r;
++}
++
++
+ /* =============================================================================
+  * element_mapCompareEdge
+  *
+@@ -822,7 +848,7 @@
+         for (b = 0; b < bNumEdge; b++) {
+             edge_t* bEdgePtr = &bEdges[b];
+             if (compareEdge(aEdgePtr, bEdgePtr) == 0) {
+-                return aEdgePtr;
++                return bEdgePtr;//aEdgePtr;
+             }
+         }
+     }
+diff -ruN -X /tmp/exc master/stamp/yada/element.h pandora-supplement/yada/element.h
+--- master/stamp/yada/element.h	2014-11-29 12:36:52.000000000 +0900
++++ pandora-supplement/yada/element.h	2026-07-13 17:48:25.000000000 +0900
+@@ -111,6 +111,8 @@
+ long
+ element_mapCompare (const pair_t* aPtr, const pair_t* bPtr);
+ 
++ulong_t element_mapHashEdge(void* voidPtr);
++ulong_t element_mapHash(void* voidPtr);
+ 
+ /* =============================================================================
+  * element_alloc
+Binary files master/stamp/yada/inputs/633.2.ele.gz and pandora-supplement/yada/inputs/633.2.ele.gz differ
+Binary files master/stamp/yada/inputs/633.2.node.gz and pandora-supplement/yada/inputs/633.2.node.gz differ
+Binary files master/stamp/yada/inputs/633.2.poly.gz and pandora-supplement/yada/inputs/633.2.poly.gz differ
+Binary files master/stamp/yada/inputs/dots.2.ele.gz and pandora-supplement/yada/inputs/dots.2.ele.gz differ
+Binary files master/stamp/yada/inputs/dots.2.node.gz and pandora-supplement/yada/inputs/dots.2.node.gz differ
+Binary files master/stamp/yada/inputs/dots.2.poly.gz and pandora-supplement/yada/inputs/dots.2.poly.gz differ
+Binary files master/stamp/yada/inputs/ladder.2.ele.gz and pandora-supplement/yada/inputs/ladder.2.ele.gz differ
+Binary files master/stamp/yada/inputs/ladder.2.node.gz and pandora-supplement/yada/inputs/ladder.2.node.gz differ
+Binary files master/stamp/yada/inputs/ladder.2.poly.gz and pandora-supplement/yada/inputs/ladder.2.poly.gz differ
+Binary files master/stamp/yada/inputs/spiral.2.ele.gz and pandora-supplement/yada/inputs/spiral.2.ele.gz differ
+Binary files master/stamp/yada/inputs/spiral.2.node.gz and pandora-supplement/yada/inputs/spiral.2.node.gz differ
+Binary files master/stamp/yada/inputs/spiral.2.poly.gz and pandora-supplement/yada/inputs/spiral.2.poly.gz differ
+Binary files master/stamp/yada/inputs/ttimeu10000.2.ele.gz and pandora-supplement/yada/inputs/ttimeu10000.2.ele.gz differ
+Binary files master/stamp/yada/inputs/ttimeu10000.2.node.gz and pandora-supplement/yada/inputs/ttimeu10000.2.node.gz differ
+Binary files master/stamp/yada/inputs/ttimeu10000.2.poly.gz and pandora-supplement/yada/inputs/ttimeu10000.2.poly.gz differ
+Binary files master/stamp/yada/inputs/ttimeu100000.2.ele.gz and pandora-supplement/yada/inputs/ttimeu100000.2.ele.gz differ
+Binary files master/stamp/yada/inputs/ttimeu100000.2.node.gz and pandora-supplement/yada/inputs/ttimeu100000.2.node.gz differ
+Binary files master/stamp/yada/inputs/ttimeu100000.2.poly.gz and pandora-supplement/yada/inputs/ttimeu100000.2.poly.gz differ
+Binary files master/stamp/yada/inputs/ttimeu1000000.2.ele.gz and pandora-supplement/yada/inputs/ttimeu1000000.2.ele.gz differ
+Binary files master/stamp/yada/inputs/ttimeu1000000.2.node.gz and pandora-supplement/yada/inputs/ttimeu1000000.2.node.gz differ
+Binary files master/stamp/yada/inputs/ttimeu1000000.2.poly.gz and pandora-supplement/yada/inputs/ttimeu1000000.2.poly.gz differ
+diff -ruN -X /tmp/exc master/stamp/yada/mesh.c pandora-supplement/yada/mesh.c
+--- master/stamp/yada/mesh.c	2014-11-29 12:36:52.000000000 +0900
++++ pandora-supplement/yada/mesh.c	2026-07-13 17:48:19.000000000 +0900
+@@ -100,7 +100,7 @@
+ mesh_t*
+ mesh_alloc ()
+ {
+-    mesh_t* meshPtr = (mesh_t*)malloc(sizeof(mesh_t));
++    mesh_t* meshPtr = (mesh_t*)P_MALLOC(sizeof(mesh_t));
+ 
+     if (meshPtr) {
+         meshPtr->rootElementPtr = NULL;
+@@ -124,7 +124,7 @@
+ {
+     queue_free(meshPtr->initBadQueuePtr);
+     SET_FREE(meshPtr->boundarySetPtr);
+-    free(meshPtr);
++    P_FREE(meshPtr);
+ }
+ 
+ 
+@@ -149,8 +149,12 @@
+      */
+     long i;
+     long numEdge = element_getNumEdge(elementPtr);
++#ifdef NO_SET
++    bool_t onBoundary = FALSE;
++    edge_t* encroachedPtr = element_getEncroachedPtr(elementPtr);
++#endif
+     for (i = 0; i < numEdge; i++) {
+-        pair_t* edgePtr = element_getEdge(elementPtr, i);
++        edge_t* edgePtr = element_getEdge(elementPtr, i);
+         if (!MAP_CONTAINS(edgeMapPtr, (void*)edgePtr)) {
+             /*
+              * Record existence of this edge
+@@ -165,15 +169,29 @@
+              */
+             bool_t isSuccess;
+             element_t* sharerPtr = (element_t*)MAP_FIND(edgeMapPtr, edgePtr);
++#ifndef NO_SET
++            if (! sharerPtr) {
++                return;
++            }
++#endif
+             assert(sharerPtr); /* cannot be shared by >2 elements */
+             element_addNeighbor(elementPtr, sharerPtr);
+             element_addNeighbor(sharerPtr, elementPtr);
++#ifdef NO_SET
++            if (encroachedPtr && element_getNumEdge(sharerPtr) == 1 &&
++                element_getEdge(sharerPtr, 0) == encroachedPtr)
++            {
++                assert(!onBoundary);
++                onBoundary = TRUE;
++            }
++#else
+             isSuccess = MAP_REMOVE(edgeMapPtr, edgePtr);
+             assert(isSuccess);
+             isSuccess = MAP_INSERT(edgeMapPtr,
+                                    edgePtr,
+                                    NULL); /* marker to check >2 sharers */
+             assert(isSuccess);
++#endif
+         }
+     }
+ 
+@@ -181,12 +199,18 @@
+      * Check if really encroached
+      */
+ 
++#ifdef NO_SET
++    if (encroachedPtr && !onBoundary) {
++        element_clearEncroached(elementPtr);
++    }
++#else
+     edge_t* encroachedPtr = element_getEncroachedPtr(elementPtr);
+     if (encroachedPtr) {
+         if (!SET_CONTAINS(meshPtr->boundarySetPtr, encroachedPtr)) {
+             element_clearEncroached(elementPtr);
+         }
+     }
++#endif
+ }
+ 
+ 
+@@ -212,6 +236,10 @@
+      */
+     long i;
+     long numEdge = element_getNumEdge(elementPtr);
++#ifdef NO_SET
++    bool_t onBoundary = FALSE;
++    edge_t* encroachedPtr = element_getEncroachedPtr(elementPtr);
++#endif
+     for (i = 0; i < numEdge; i++) {
+         edge_t* edgePtr = element_getEdge(elementPtr, i);
+         if (!MAP_CONTAINS(edgeMapPtr, (void*)edgePtr)) {
+@@ -226,15 +254,29 @@
+              */
+             bool_t isSuccess;
+             element_t* sharerPtr = (element_t*)MAP_FIND(edgeMapPtr, edgePtr);
++#ifndef NO_SET
++            if (! sharerPtr) {
++                return;
++            }
++#endif
+             assert(sharerPtr); /* cannot be shared by >2 elements */
+             TMELEMENT_ADDNEIGHBOR(elementPtr, sharerPtr);
+             TMELEMENT_ADDNEIGHBOR(sharerPtr, elementPtr);
++#ifdef NO_SET
++            if (encroachedPtr && element_getNumEdge(sharerPtr) == 1 &&
++                element_getEdge(sharerPtr, 0) == encroachedPtr)
++            {
++                assert(!onBoundary);
++                onBoundary = TRUE;
++            }
++#else
+             isSuccess = PMAP_REMOVE(edgeMapPtr, edgePtr);
+             assert(isSuccess);
+             isSuccess = PMAP_INSERT(edgeMapPtr,
+                                     edgePtr,
+                                     NULL); /* marker to check >2 sharers */
+             assert(isSuccess);
++#endif
+         }
+     }
+ 
+@@ -242,12 +284,18 @@
+      * Check if really encroached
+      */
+ 
++#ifdef NO_SET
++    if (encroachedPtr && !onBoundary) {
++        element_clearEncroached(elementPtr);
++    }
++#else
+     edge_t* encroachedPtr = element_getEncroachedPtr(elementPtr);
+     if (encroachedPtr) {
+         if (!TMSET_CONTAINS(meshPtr->boundarySetPtr, encroachedPtr)) {
+             element_clearEncroached(elementPtr);
+         }
+     }
++#endif
+ }
+ 
+ 
+@@ -258,6 +306,11 @@
+ void
+ TMmesh_remove (TM_ARGDECL  mesh_t* meshPtr, element_t* elementPtr)
+ {
++#if 0
++    if (TMELEMENT_ISGARBAGE(elementPtr)) {
++        return;
++    }
++#endif
+     assert(!TMELEMENT_ISGARBAGE(elementPtr));
+ 
+     /*
+@@ -325,11 +378,13 @@
+     element_t* elementPtr = element_alloc(coordinates, numCoordinate);
+     assert(elementPtr);
+ 
++#ifndef NO_SET
+     if (numCoordinate == 2) {
+         edge_t* boundaryPtr = element_getEdge(elementPtr, 0);
+         bool_t status = SET_INSERT(meshPtr->boundarySetPtr, boundaryPtr);
+         assert(status);
+     }
++#endif
+ 
+     mesh_insert(meshPtr, elementPtr, edgeMapPtr);
+ 
+@@ -363,7 +418,7 @@
+     long i;
+     long numElement = 0;
+ 
+-    MAP_T* edgeMapPtr = MAP_ALLOC(NULL, &element_mapCompareEdge);
++    MAP_T* edgeMapPtr = MAP_ALLOC(&element_mapHashEdge, &element_mapCompareEdge);
+     assert(edgeMapPtr);
+ 
+     /*
+@@ -376,7 +431,7 @@
+     sscanf(inputBuff, "%li %li", &numEntry, &numDimension);
+     assert(numDimension == 2); /* must be 2-D */
+     numCoordinate = numEntry + 1; /* numbering can start from 1 */
+-    coordinates = (coordinate_t*)malloc(numCoordinate * sizeof(coordinate_t));
++    coordinates = (coordinate_t*)P_MALLOC(numCoordinate * sizeof(coordinate_t));
+     assert(coordinates);
+     for (i = 0; i < numEntry; i++) {
+         long id;
+@@ -463,7 +518,7 @@
+     numElement += numEntry;
+     fclose(inputFile);
+ 
+-    free(coordinates);
++    P_FREE(coordinates);
+     MAP_FREE(edgeMapPtr);
+ 
+     return numElement;
+diff -ruN -X /tmp/exc master/stamp/yada/region.c pandora-supplement/yada/region.c
+--- master/stamp/yada/region.c	2014-11-29 12:36:52.000000000 +0900
++++ pandora-supplement/yada/region.c	2026-07-13 17:48:08.000000000 +0900
+@@ -107,7 +107,7 @@
+         assert(regionPtr->beforeListPtr);
+         regionPtr->borderListPtr = PLIST_ALLOC(&element_listCompareEdge);
+         assert(regionPtr->borderListPtr);
+-        regionPtr->badVectorPtr = PVECTOR_ALLOC(1);
++        regionPtr->badVectorPtr = PVECTOR_ALLOC(0);
+         assert(regionPtr->badVectorPtr);
+     }
+ 
+@@ -199,6 +199,7 @@
+         assert(bElementPtr);
+         TMMESH_INSERT(meshPtr, bElementPtr, edgeMapPtr);
+ 
++#ifndef NO_SET
+         bool_t status;
+         status = TMMESH_REMOVEBOUNDARY(meshPtr, element_getEdge(elementPtr, 0));
+         assert(status);
+@@ -206,7 +207,7 @@
+         assert(status);
+         status = TMMESH_INSERTBOUNDARY(meshPtr, element_getEdge(bElementPtr, 0));
+         assert(status);
+-
++#endif
+         numDelta += 2;
+     }
+ 
+@@ -271,7 +272,7 @@
+     while (!PQUEUE_ISEMPTY(expandQueuePtr)) {
+ 
+         element_t* currentElementPtr = (element_t*)PQUEUE_POP(expandQueuePtr);
+-
++        assert(currentElementPtr );
+         PLIST_INSERT(beforeListPtr, (void*)currentElementPtr); /* no duplicates */
+         list_t* neighborListPtr = element_getNeighborListPtr(currentElementPtr);
+ 
+@@ -280,7 +281,10 @@
+         while (TMLIST_ITER_HASNEXT(&it, neighborListPtr)) {
+             element_t* neighborElementPtr =
+                 (element_t*)TMLIST_ITER_NEXT(&it, neighborListPtr);
+-            TMELEMENT_ISGARBAGE(neighborElementPtr); /* so we can detect conflicts */
++            bool_t isGarbage = TMELEMENT_ISGARBAGE(neighborElementPtr); /* so we can detect conflicts */
++            if(!neighborElementPtr || isGarbage){
++                continue;
++            }
+             if (!list_find(beforeListPtr, (void*)neighborElementPtr)) {
+                 if (element_isInCircumCircle(neighborElementPtr, centerCoordinatePtr)) {
+                     /* This is part of the region */
+@@ -302,7 +306,7 @@
+                         TM_RESTART();
+                     }
+                     PLIST_INSERT(borderListPtr,
+-                                 (void*)borderEdgePtr); /* no duplicates */
++                        (void*)borderEdgePtr);/*no duplicates */
+                     if (!MAP_CONTAINS(edgeMapPtr, borderEdgePtr)) {
+                         PMAP_INSERT(edgeMapPtr, borderEdgePtr, neighborElementPtr);
+                     }
+@@ -330,10 +334,12 @@
+     MAP_T* edgeMapPtr = NULL;
+     element_t* encroachElementPtr = NULL;
+ 
+-    TMELEMENT_ISGARBAGE(elementPtr); /* so we can detect conflicts */
++    if (TMELEMENT_ISGARBAGE(elementPtr)){
++	    return numDelta;/* so we can detect conflicts */
++    }
+ 
+     while (1) {
+-        edgeMapPtr = PMAP_ALLOC(NULL, &element_mapCompareEdge);
++        edgeMapPtr = PMAP_ALLOC(&element_mapHashEdge, &element_mapCompareEdge);
+         assert(edgeMapPtr);
+         encroachElementPtr = TMgrowRegion(TM_ARG
+                                           elementPtr,
+@@ -348,7 +354,7 @@
+                                         encroachElementPtr,
+                                         meshPtr);
+             if (TMELEMENT_ISGARBAGE(elementPtr)) {
+-                break;
++               break;
+             }
+         } else {
+             break;
+@@ -385,6 +391,30 @@
+ }
+ 
+ 
++/* =============================================================================
++ * region_transferBad
++ * =============================================================================
++ */
++void
++region_transferBad (region_t* regionPtr, heap_t* workHeapPtr)
++{
++    vector_t* badVectorPtr = regionPtr->badVectorPtr;
++    long numBad = PVECTOR_GETSIZE(badVectorPtr);
++    long i;
++
++    for (i = 0; i < numBad; i++) {
++        element_t* badElementPtr = (element_t*)vector_at(badVectorPtr, i);
++        if (element_isGarbage(badElementPtr)) {
++            PELEMENT_FREE(badElementPtr);
++        } else {
++
++            bool_t status = heap_insert(workHeapPtr, (void*)badElementPtr);
++            assert(status);
++        }
++    }
++}
++
++
+ /* =============================================================================
+  * TMregion_transferBad
+  * =============================================================================
+diff -ruN -X /tmp/exc master/stamp/yada/region.h pandora-supplement/yada/region.h
+--- master/stamp/yada/region.h	2014-11-29 12:36:52.000000000 +0900
++++ pandora-supplement/yada/region.h	2026-07-13 17:48:05.000000000 +0900
+@@ -123,6 +123,14 @@
+ 
+ 
+ /* =============================================================================
++ * region_transferBad
++ * =============================================================================
++ */
++void
++region_transferBad (region_t* regionPtr, heap_t* workHeapPtr);
++
++
++/* =============================================================================
+  * TMregion_transferBad
+  * =============================================================================
+  */
+diff -ruN -X /tmp/exc master/stamp/yada/yada.c pandora-supplement/yada/yada.c
+--- master/stamp/yada/yada.c	2014-11-29 12:36:52.000000000 +0900
++++ pandora-supplement/yada/yada.c	2026-07-13 17:47:52.000000000 +0900
+@@ -88,6 +88,7 @@
+ 
+ 
+ char*    global_inputPrefix     = PARAM_DEFAULT_INPUTPREFIX;
++long     global_numCore         = PARAM_DEFAULT_NUMTHREAD;
+ long     global_numThread       = PARAM_DEFAULT_NUMTHREAD;
+ double   global_angleConstraint = PARAM_DEFAULT_ANGLE;
+ mesh_t*  global_meshPtr;
+@@ -95,6 +96,13 @@
+ long     global_totalNumAdded = 0;
+ long     global_numProcess    = 0;
+ 
++typedef struct arg {
++    heap_t** workHeaps;
++} arg_t;
++
++#ifdef FINE_LOCK
++#error "In yada, it is dificult to implement fine-grained lock version."
++#endif
+ 
+ /* =============================================================================
+  * displayUsage
+@@ -133,7 +141,7 @@
+                 global_inputPrefix = optarg;
+                 break;
+             case 't':
+-                global_numThread = atol(optarg);
++                global_numCore = atol(optarg);
+                 break;
+             case '?':
+             default:
+@@ -187,11 +195,17 @@
+  * =============================================================================
+  */
+ void
+-process ()
++process (void* argPtr)
+ {
+     TM_THREAD_ENTER();
+ 
++    long threadId = thread_getId();
++
++#ifdef LOCAL_HEAP
++    heap_t* workHeapPtr = ((arg_t*)argPtr)->workHeaps[threadId];
++#else
+     heap_t* workHeapPtr = global_workHeapPtr;
++#endif
+     mesh_t* meshPtr = global_meshPtr;
+     region_t* regionPtr;
+     long totalNumAdded = 0;
+@@ -204,28 +218,41 @@
+ 
+         element_t* elementPtr;
+ 
++#ifdef LOCAL_HEAP
++        elementPtr = heap_remove(workHeapPtr);
++#else
+         TM_BEGIN();
+         elementPtr = TMHEAP_REMOVE(workHeapPtr);
+         TM_END();
++#endif
+         if (elementPtr == NULL) {
+             break;
+         }
+ 
+         bool_t isGarbage;
++#if 1
+         TM_BEGIN();
+         isGarbage = TMELEMENT_ISGARBAGE(elementPtr);
+         TM_END();
+         if (isGarbage) {
+-            /*
+-             * Handle delayed deallocation
+-             */
+-            PELEMENT_FREE(elementPtr);
+-            continue;
++           /*
++            * Handle delayed deallocation
++            */
++           PELEMENT_FREE(elementPtr);
++           continue;
+         }
+-
+-        long numAdded;
++#endif
++        long numAdded = 0L;
+ 
+         TM_BEGIN();
++#if 0
++        isGarbage = TMELEMENT_ISGARBAGE(elementPtr);
++        if (isGarbage){
++            TMELEMENT_FREE(elementPtr);
++            TM_END();
++            continue;
++        }
++#endif
+         PREGION_CLEARBAD(regionPtr);
+         numAdded = TMREGION_REFINE(regionPtr, elementPtr, meshPtr);
+         TM_END();
+@@ -243,9 +270,13 @@
+ 
+         totalNumAdded += numAdded;
+ 
++#ifdef LOCAL_HEAP
++        region_transferBad(regionPtr, workHeapPtr);
++#else
+         TM_BEGIN();
+         TMREGION_TRANSFERBAD(regionPtr, workHeapPtr);
+         TM_END();
++#endif
+ 
+         numProcess++;
+ 
+@@ -277,10 +308,20 @@
+      */
+ 
+     parseArgs(argc, (char** const)argv);
+-    SIM_GET_NUM_CPU(global_numThread);
+-    TM_STARTUP(global_numThread);
++    global_numThread = global_numCore * THREADS_PER_CORE;
++    {
++        char* s = getenv("THR_PER_CORE");
++        if (s != NULL)  {
++            global_numThread = global_numCore * strtol(s, NULL, 10);
++        }
++    }
++
++
++    SIM_GET_NUM_CPU(global_numCore);
++    TM_STARTUP(global_numCore);
+     P_MEMORY_STARTUP(global_numThread);
+-    thread_startup(global_numThread);
++    thread_startup(global_numCore, global_numThread);
++
+     global_meshPtr = mesh_alloc();
+     assert(global_meshPtr);
+     printf("Angle constraint = %lf\n", global_angleConstraint);
+@@ -296,6 +337,29 @@
+     printf("Starting triangulation...");
+     fflush(stdout);
+ 
++#ifdef LOCAL_HEAP
++    heap_t** workHeaps = (heap_t**)P_MALLOC(global_numThread * sizeof(heap_t*));
++    assert(workHeaps);
++    long i;
++    for (i = 0; i < global_numThread; ++i) {
++        heap_t* workHeapPtr = heap_alloc(1, &element_heapCompare);
++        assert(workHeapPtr);
++        workHeaps[i] = workHeapPtr;
++    }
++
++    for (i = 0; i < initNumBadElement; ++i) {
++        long target = i % global_numThread;
++        element_t* element = (element_t*)heap_remove(global_workHeapPtr);
++        heap_insert(workHeaps[target], element);
++    }
++
++    arg_t arg;
++    arg.workHeaps = workHeaps;
++#else
++    arg_t arg;
++    arg.workHeaps = NULL;
++#endif
++
+     /*
+      * Run benchmark
+      */
+@@ -306,10 +370,10 @@
+ #ifdef OTM
+ #pragma omp parallel
+     {
+-        process();
++        process((void*)&arg);
+     }
+ #else
+-    thread_start(process, NULL);
++    thread_start(process, (void*)&arg);
+ #endif
+     GOTO_REAL();
+     TIMER_T stop;

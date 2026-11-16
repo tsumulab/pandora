@@ -1,0 +1,1029 @@
+diff -ruN -X /tmp/exc master/stamp/genome/gene.c pandora-supplement/genome/gene.c
+--- master/stamp/genome/gene.c	2026-10-29 16:21:09.424074063 +0900
++++ pandora-supplement/genome/gene.c	2026-10-29 16:21:09.426024555 +0900
+@@ -91,12 +91,12 @@
+ 
+     assert(length > 1);
+ 
+-    genePtr = (gene_t*)malloc(sizeof(gene_t));
++    genePtr = (gene_t*)P_MALLOC(sizeof(gene_t));
+     if (genePtr == NULL) {
+         return NULL;
+     }
+ 
+-    genePtr->contents = (char*)malloc((length + 1) * sizeof(char));
++    genePtr->contents = (char*)P_MALLOC((length + 1) * sizeof(char));
+     if (genePtr->contents == NULL) {
+         return NULL;
+     }
+@@ -151,8 +151,8 @@
+ gene_free (gene_t* genePtr)
+ {
+     bitmap_free(genePtr->startBitmapPtr);
+-    free(genePtr->contents);
+-    free(genePtr);
++    P_FREE(genePtr->contents);
++    P_FREE(genePtr);
+ }
+ 
+ 
+diff -ruN -X /tmp/exc master/stamp/genome/genome.c pandora-supplement/genome/genome.c
+--- master/stamp/genome/genome.c	2026-10-29 16:21:09.424105270 +0900
++++ pandora-supplement/genome/genome.c	2026-10-29 16:21:09.426049432 +0900
+@@ -100,6 +100,11 @@
+ 
+ long global_params[256]; /* 256 = ascii limit */
+ 
++#ifdef FINE_LOCK
++LOCK_T* lock_step1;
++LOCK_T** lock_step2a;
++#endif
++
+ 
+ /* =============================================================================
+  * displayUsage
+@@ -190,17 +195,24 @@
+     parseArgs(argc, (char** const)argv);
+     SIM_GET_NUM_CPU(global_params[PARAM_THREAD]);
+ 
+-    printf("Creating gene and segments... ");
+-    fflush(stdout);
+-
+     long geneLength = global_params[PARAM_GENE];
+     long segmentLength = global_params[PARAM_SEGMENT];
+     long minNumSegment = global_params[PARAM_NUMBER];
+-    long numThread = global_params[PARAM_THREAD];
++    long numCore = global_params[PARAM_THREAD];
++    long numThread = numCore * THREADS_PER_CORE;
++    {
++        char* s = getenv("THR_PER_CORE");
++        if (s != NULL)  {
++            numThread = numCore * strtol(s, NULL, 10);
++        }
++    }
+ 
+-    TM_STARTUP(numThread);
++    TM_STARTUP(numCore);
+     P_MEMORY_STARTUP(numThread);
+-    thread_startup(numThread);
++    thread_startup(numCore, numThread);
++
++    printf("Creating gene and segments... ");
++    fflush(stdout);
+ 
+     random_t* randomPtr = random_alloc();
+     assert(randomPtr != NULL);
+@@ -223,6 +235,24 @@
+     printf("Number segments = %li\n", vector_getSize(segmentsPtr->contentsPtr));
+     fflush(stdout);
+ 
++#ifdef FINE_LOCK
++    long i, j;
++    lock_step1 = (LOCK_T*)P_MALLOC(geneLength * sizeof(LOCK_T));
++    assert(lock_step1 != NULL);
++    for (i = 0; i < geneLength; ++i) {
++        LOCK_INIT(lock_step1[i]);
++    }
++    lock_step2a = (LOCK_T**)P_MALLOC(segmentLength * sizeof(LOCK_T*));
++    assert(lock_step2a != NULL);
++    for (i = 0; i < segmentLength; ++i) {
++        lock_step2a[i] = (LOCK_T*)P_MALLOC(geneLength * sizeof(LOCK_T));
++        assert(lock_step2a[i] != NULL);
++        for (j = 0; j < geneLength; ++j) {
++            LOCK_INIT(lock_step2a[i][j]);
++        }
++    }
++#endif
++
+     /* Benchmark */
+     printf("Sequencing gene... ");
+     fflush(stdout);
+@@ -265,6 +295,15 @@
+     puts("done.");
+     fflush(stdout);
+ 
++#ifdef FINE_LOCK
++    P_FREE(lock_step1);
++    for (i = 0; i < segmentLength; ++i) {
++        P_FREE(lock_step2a[i]);
++    }
++    P_FREE(lock_step2a);
++#endif
++
++
+     TM_SHUTDOWN();
+     P_MEMORY_SHUTDOWN();
+ 
+diff -ruN -X /tmp/exc master/stamp/genome/segments.c pandora-supplement/genome/segments.c
+--- master/stamp/genome/segments.c	2026-10-29 16:21:09.424182116 +0900
++++ pandora-supplement/genome/segments.c	2026-10-29 16:21:09.426096896 +0900
+@@ -95,18 +95,18 @@
+     long i;
+     char* string;
+ 
+-    segmentsPtr = (segments_t*)malloc(sizeof(segments_t));
++    segmentsPtr = (segments_t*)P_MALLOC(sizeof(segments_t));
+     if (segmentsPtr == NULL) {
+         return NULL;
+     }
+ 
+     /* Preallocate for the min number of segments we will need */
+-    segmentsPtr->strings = (char**)malloc(minNum * sizeof(char*));
++    segmentsPtr->strings = (char**)P_MALLOC(minNum * sizeof(char*));
+     if (segmentsPtr->strings == NULL) {
+         return NULL;
+     }
+ 
+-    string = (char*)malloc(minNum * (length+1) * sizeof(char));
++    string = (char*)P_MALLOC(minNum * (length+1) * sizeof(char));
+     if (string == NULL) {
+         return NULL;
+     }
+@@ -117,7 +117,7 @@
+     segmentsPtr->minNum = minNum;
+     segmentsPtr->length = length;
+ 
+-    segmentsPtr->contentsPtr = vector_alloc(minNum);
++    segmentsPtr->contentsPtr = vector_alloc(0);
+     if (segmentsPtr->contentsPtr == NULL) {
+         return NULL;
+     }
+@@ -172,7 +172,7 @@
+     /* Make sure segment covers start */
+     i = 0;
+     if (!bitmap_isSet(startBitmapPtr, i)) {
+-        char* string = (char*)malloc((segmentLength+1) * sizeof(char));
++        char* string = (char*)P_MALLOC((segmentLength+1) * sizeof(char));
+         string[segmentLength] = '\0';
+         memcpy(string, &(geneString[i]), segmentLength * sizeof(char));
+         bool_t status = vector_pushBack(segmentsContentsPtr, (void*)string);
+@@ -192,7 +192,7 @@
+         }
+         if (i == i_stop) {
+             /* Found big enough hole */
+-            char* string = (char*)malloc((segmentLength+1) * sizeof(char));
++            char* string = (char*)P_MALLOC((segmentLength+1) * sizeof(char));
+             string[segmentLength] = '\0';
+             i = i - 1;
+             memcpy(string, &(geneString[i]), segmentLength * sizeof(char));
+@@ -212,10 +212,10 @@
+ void
+ segments_free (segments_t* segmentsPtr)
+ {
+-    free(vector_at(segmentsPtr->contentsPtr, 0));
++    P_FREE(vector_at(segmentsPtr->contentsPtr, 0));
+     vector_free(segmentsPtr->contentsPtr);
+-    free(segmentsPtr->strings);
+-    free(segmentsPtr);
++    P_FREE(segmentsPtr->strings);
++    P_FREE(segmentsPtr);
+ }
+ 
+ 
+diff -ruN -X /tmp/exc master/stamp/genome/sequencer.c pandora-supplement/genome/sequencer.c
+--- master/stamp/genome/sequencer.c	2026-10-29 16:21:09.424213024 +0900
++++ pandora-supplement/genome/sequencer.c	2026-10-29 16:21:09.425965130 +0900
+@@ -108,8 +108,15 @@
+     struct constructEntry* endPtr;
+     long overlap;
+     long length;
++#ifdef FINE_LOCK
++    LOCK_T lock;
++#endif
+ };
+ 
++#ifdef FINE_LOCK
++extern LOCK_T* lock_step1;
++extern LOCK_T** lock_step2a;
++#endif
+ 
+ /* =============================================================================
+  * hashString
+@@ -167,7 +174,7 @@
+     long maxNumUniqueSegment = geneLength - segmentLength + 1;
+     long i;
+ 
+-    sequencerPtr = (sequencer_t*)malloc(sizeof(sequencer_t));
++    sequencerPtr = (sequencer_t*)P_MALLOC(sizeof(sequencer_t));
+     if (sequencerPtr == NULL) {
+         return NULL;
+     }
+@@ -180,14 +187,14 @@
+ 
+     /* For finding a matching entry */
+     sequencerPtr->endInfoEntries =
+-        (endInfoEntry_t*)malloc(maxNumUniqueSegment * sizeof(endInfoEntry_t));
++        (endInfoEntry_t*)P_MALLOC(maxNumUniqueSegment * sizeof(endInfoEntry_t));
+     for (i = 0; i < maxNumUniqueSegment; i++) {
+         endInfoEntry_t* endInfoEntryPtr = &sequencerPtr->endInfoEntries[i];
+         endInfoEntryPtr->isEnd = TRUE;
+         endInfoEntryPtr->jumpToNext = 1;
+     }
+     sequencerPtr->startHashToConstructEntryTables =
+-        (table_t**)malloc(segmentLength * sizeof(table_t*));
++        (table_t**)P_MALLOC(segmentLength * sizeof(table_t*));
+     if (sequencerPtr->startHashToConstructEntryTables == NULL) {
+         return NULL;
+     }
+@@ -199,10 +206,11 @@
+         }
+     }
+     sequencerPtr->segmentLength = segmentLength;
++    sequencerPtr->geneLength = geneLength;
+ 
+     /* For constructing sequence */
+     sequencerPtr->constructEntries =
+-        (constructEntry_t*)malloc(maxNumUniqueSegment * sizeof(constructEntry_t));
++        (constructEntry_t*)P_MALLOC(maxNumUniqueSegment * sizeof(constructEntry_t));
+     if (sequencerPtr->constructEntries == NULL) {
+         return NULL;
+     }
+@@ -216,6 +224,9 @@
+         constructEntryPtr->endPtr = constructEntryPtr;
+         constructEntryPtr->overlap = 0;
+         constructEntryPtr->length = segmentLength;
++#ifdef FINE_LOCK
++        LOCK_INIT(constructEntryPtr->lock);
++#endif
+     }
+     sequencerPtr->hashToConstructEntryTable = table_alloc(geneLength, NULL);
+     if (sequencerPtr->hashToConstructEntryTable == NULL) {
+@@ -227,6 +238,7 @@
+     return sequencerPtr;
+ }
+ 
++#ifndef FINE_LOCK
+ 
+ /* =============================================================================
+  * sequencer_run
+@@ -258,6 +270,7 @@
+     vector_t*   segmentsContentsPtr = segmentsPtr->contentsPtr;
+     long        numSegment          = vector_getSize(segmentsContentsPtr);
+     long        segmentLength       = segmentsPtr->length;
++    long        geneLength          = sequencerPtr->geneLength;
+ 
+     long i;
+     long j;
+@@ -270,22 +283,47 @@
+     /*
+      * Step 1: Remove duplicate segments
+      */
+-#if defined(HTM) || defined(STM)
+     long numThread = thread_getNumThread();
+     {
+-        /* Choose disjoint segments [i_start,i_stop) for each thread */
+-        long partitionSize = (numSegment + numThread/2) / numThread; /* with rounding */
+-        i_start = threadId * partitionSize;
+-        if (threadId == (numThread - 1)) {
+-            i_stop = numSegment;
+-        } else {
+-            i_stop = i_start + partitionSize;
++        /* Choose disjoint segments [i_start, i_stop) for each thread */
++        i_start = threadId * numSegment / numThread;
++        i_stop = (threadId + 1) * numSegment / numThread;
++
++        assert(i_start <= numSegment && i_stop <= numSegment);
++    }
++
++#ifdef USE_LOCAL_HASHTABLE
++    hashtable_t* localHashtablePtr;
++    localHashtablePtr =
++        hashtable_alloc(geneLength, &hashSegment, &compareSegment, -1, -1);
++    assert(localHashtablePtr);
++    for (i = i_start; i < i_stop; ++i) {
++        void* segment = vector_at(segmentsContentsPtr, i);
++        hashtable_insert(localHashtablePtr, segment, segment);
++    }
++
++    {
++        list_t* chainPtr;
++        list_iter_t it;
++        long num = localHashtablePtr->numBucket;
++        for (i = 0; i < num; ++i) {
++            chainPtr = localHashtablePtr->buckets[i];
++            list_iter_reset(&it, chainPtr);
++
++            while (list_iter_hasNext(&it, chainPtr)) {
++                void* segment =
++                    (void*)((pair_t*)list_iter_next(&it, chainPtr))->firstPtr;
++                TM_BEGIN();
++                {
++                    TMHASHTABLE_INSERT(uniqueSegmentsPtr, segment, segment);
++                }
++                TM_END();
++            }
+         }
++
++        hashtable_free(localHashtablePtr);
+     }
+-#else /* !(HTM || STM) */
+-    i_start = 0;
+-    i_stop = numSegment;
+-#endif /* !(HTM || STM) */
++#else
+     for (i = i_start; i < i_stop; i+=CHUNK_STEP1) {
+         TM_BEGIN();
+         {
+@@ -300,6 +338,7 @@
+         }
+         TM_END();
+     }
++#endif
+ 
+     thread_barrier_wait();
+ 
+@@ -327,91 +366,102 @@
+     numUniqueSegment = hashtable_getSize(uniqueSegmentsPtr);
+     entryIndex = 0;
+ 
+-#if defined(HTM) || defined(STM)
+-    {
+-        /* Choose disjoint segments [i_start,i_stop) for each thread */
+-        long num = uniqueSegmentsPtr->numBucket;
+-        long partitionSize = (num + numThread/2) / numThread; /* with rounding */
+-        i_start = threadId * partitionSize;
+-        if (threadId == (numThread - 1)) {
+-            i_stop = num;
+-        } else {
+-            i_stop = i_start + partitionSize;
++    if (threadId == 0) {
++        entryIndex = 0;
++        for (i = 0; i < uniqueSegmentsPtr->numBucket; ++i) {
++            list_t* chainPtr = uniqueSegmentsPtr->buckets[i];
++            list_iter_t it;
++            list_iter_reset(&it, chainPtr);
++
++            while (list_iter_hasNext(&it, chainPtr)) {
++                char* segment =
++                    (char*)((pair_t*)list_iter_next(&it, chainPtr))->firstPtr;
++                constructEntries[entryIndex].segment = segment;
++                ++entryIndex;
++            }
+         }
+     }
+-    {
+-        /* Approximate disjoint segments of element allocation in constructEntries */
+-        long partitionSize = (numUniqueSegment + numThread/2) / numThread; /* with rounding */
+-        entryIndex = threadId * partitionSize;
+-    }
+-#else /* !(HTM || STM) */
+-    i_start = 0;
+-    i_stop = uniqueSegmentsPtr->numBucket;
+-    entryIndex = 0;
+-#endif /* !(HTM || STM) */
+ 
+-    for (i = i_start; i < i_stop; i++) {
++    thread_barrier_wait();
+ 
+-        list_t* chainPtr = uniqueSegmentsPtr->buckets[i];
+-        list_iter_t it;
+-        list_iter_reset(&it, chainPtr);
++    {
++        /* Choose disjoint segments [i_start,i_stop) for each thread */
++        i_start = threadId * numUniqueSegment / numThread;
++        i_stop = (threadId + 1) * numUniqueSegment / numThread;
++
++        assert(i_start <= numUniqueSegment && i_stop <= numUniqueSegment);
++    }
+ 
+-        while (list_iter_hasNext(&it, chainPtr)) {
++    for (i = i_start; i < i_stop; i++) {
++        long j;
++        constructEntry_t* constructEntryPtr;
++        char* segment;
++        ulong_t startHash;
++        bool_t status;
+ 
+-            char* segment =
+-                (char*)((pair_t*)list_iter_next(&it, chainPtr))->firstPtr;
+-            constructEntry_t* constructEntryPtr;
+-            long j;
+-            ulong_t startHash;
+-            bool_t status;
++        constructEntryPtr = &constructEntries[i];
++        segment = constructEntryPtr->segment;
+ 
+-            /* Find an empty constructEntries entry */
++        /*
++         * Save hashes (sdbm algorithm) of segment substrings
++         *
++         * endHashes will be computed for shorter substrings after matches
++         * have been made (in the next phase of the code). This will reduce
++         * the number of substrings for which hashes need to be computed.
++         *
++         * Since we can compute startHashes incrementally, we go ahead
++         * and compute all of them here.
++         */
++        /* constructEntryPtr is local now */
++        constructEntryPtr->endHash = (ulong_t)hashString(&segment[1]);
++
++        startHash = 0;
++#ifdef CHUNK_STEP2A
++        for (j = 1; j < segmentLength; j+=CHUNK_STEP2A) {
++            long temp_hash = startHash;
+             TM_BEGIN();
+-            while (((void*)TM_SHARED_READ_P(constructEntries[entryIndex].segment)) != NULL) {
+-                entryIndex = (entryIndex + 1) % numUniqueSegment; /* look for empty */
++            {
++                startHash = temp_hash;
++                long jj;
++                long jj_stop = MIN(segmentLength, j+CHUNK_STEP2A);
++                for (jj = j; jj < jj_stop; ++jj) {
++                    startHash = (ulong_t)segment[jj-1] +
++                                (startHash << 6) + (startHash << 16) - startHash;
++                    status = TMTABLE_INSERT(startHashToConstructEntryTables[jj],
++                                            (ulong_t)startHash,
++                                            (void*)constructEntryPtr);
++                    assert(status);
++                } /* ii */
+             }
+-            constructEntryPtr = &constructEntries[entryIndex];
+-            TM_SHARED_WRITE_P(constructEntryPtr->segment, segment);
+             TM_END();
+-            entryIndex = (entryIndex + 1) % numUniqueSegment;
+-
+-            /*
+-             * Save hashes (sdbm algorithm) of segment substrings
+-             *
+-             * endHashes will be computed for shorter substrings after matches
+-             * have been made (in the next phase of the code). This will reduce
+-             * the number of substrings for which hashes need to be computed.
+-             *
+-             * Since we can compute startHashes incrementally, we go ahead
+-             * and compute all of them here.
+-             */
+-            /* constructEntryPtr is local now */
+-            constructEntryPtr->endHash = (ulong_t)hashString(&segment[1]);
+-
+-            startHash = 0;
+-            for (j = 1; j < segmentLength; j++) {
+-                startHash = (ulong_t)segment[j-1] +
+-                            (startHash << 6) + (startHash << 16) - startHash;
+-                TM_BEGIN();
+-                status = TMTABLE_INSERT(startHashToConstructEntryTables[j],
+-                                        (ulong_t)startHash,
+-                                        (void*)constructEntryPtr );
+-                TM_END();
+-                assert(status);
+-            }
+-
+-            /*
+-             * For looking up construct entries quickly
+-             */
++        }
++#else
++        for (j = 1; j < segmentLength; j++) {
+             startHash = (ulong_t)segment[j-1] +
+                         (startHash << 6) + (startHash << 16) - startHash;
+             TM_BEGIN();
+-            status = TMTABLE_INSERT(hashToConstructEntryTable,
++            status = TMTABLE_INSERT(startHashToConstructEntryTables[j],
+                                     (ulong_t)startHash,
+                                     (void*)constructEntryPtr);
+             TM_END();
+             assert(status);
+         }
++#endif
++
++        /*
++         * For looking up construct entries quickly
++         */
++        /* This process seems futile. Therefore, I commented it out. */
++#if 0
++        startHash = (ulong_t)segment[j-1] +
++                    (startHash << 6) + (startHash << 16) - startHash;
++        TM_BEGIN();
++        status = TMTABLE_INSERT(hashToConstructEntryTable,
++                                (ulong_t)startHash,
++                                (void*)constructEntryPtr);
++        TM_END();
++        assert(status);
++#endif
+     }
+ 
+     thread_barrier_wait();
+@@ -429,21 +479,13 @@
+         long index_start;
+         long index_stop;
+ 
+-#if defined(HTM) || defined(STM)
+         {
+-            /* Choose disjoint segments [index_start,index_stop) for each thread */
+-            long partitionSize = (numUniqueSegment + numThread/2) / numThread; /* with rounding */
+-            index_start = threadId * partitionSize;
+-            if (threadId == (numThread - 1)) {
+-                index_stop = numUniqueSegment;
+-            } else {
+-                index_stop = index_start + partitionSize;
+-            }
++            /* Choose disjoint segments [index_start, index_stop) for each thread */
++            index_start = threadId * numUniqueSegment / numThread;
++            index_stop = (threadId + 1) * numUniqueSegment / numThread;
++
++            assert(index_start <= numUniqueSegment && index_stop <= numUniqueSegment);
+         }
+-#else /* !(HTM || STM) */
+-        index_start = 0;
+-        index_stop = numUniqueSegment;
+-#endif /* !(HTM || STM) */
+ 
+         /* Iterating over disjoint itervals in the range [0, numUniqueSegment) */
+         for (entryIndex = index_start;
+@@ -617,6 +659,433 @@
+     TM_THREAD_EXIT();
+ }
+ 
++#else /* FINE_LOCK */
++
++/* =============================================================================
++ * sequencer_run
++ * =============================================================================
++ */
++void
++sequencer_run (void* argPtr)
++{
++    TM_THREAD_ENTER();
++
++    long threadId = thread_getId();
++
++    sequencer_t* sequencerPtr = (sequencer_t*)argPtr;
++
++    hashtable_t*      uniqueSegmentsPtr;
++    endInfoEntry_t*   endInfoEntries;
++    table_t**         startHashToConstructEntryTables;
++    constructEntry_t* constructEntries;
++    table_t*          hashToConstructEntryTable;
++
++    uniqueSegmentsPtr               = sequencerPtr->uniqueSegmentsPtr;
++    endInfoEntries                  = sequencerPtr->endInfoEntries;
++    startHashToConstructEntryTables = sequencerPtr->startHashToConstructEntryTables;
++    constructEntries                = sequencerPtr->constructEntries;
++    hashToConstructEntryTable       = sequencerPtr->hashToConstructEntryTable;
++
++    segments_t* segmentsPtr         = sequencerPtr->segmentsPtr;
++    assert(segmentsPtr);
++    vector_t*   segmentsContentsPtr = segmentsPtr->contentsPtr;
++    long        numSegment          = vector_getSize(segmentsContentsPtr);
++    long        segmentLength       = segmentsPtr->length;
++    long        geneLength          = sequencerPtr->geneLength;
++
++    long i;
++    long j;
++    long i_start;
++    long i_stop;
++    long numUniqueSegment;
++    long substringLength;
++    long entryIndex;
++
++    /*
++     * Step 1: Remove duplicate segments
++     */
++    long numThread = thread_getNumThread();
++    {
++        /* Choose disjoint segments [i_start, i_stop) for each thread */
++        i_start = threadId * numSegment / numThread;
++        i_stop = (threadId + 1) * numSegment / numThread;
++
++        assert(i_start <= numSegment && i_stop <= numSegment);
++    }
++
++#ifdef LOCAL_HASHTABLE
++    hashtable_t* localHashtablePtr;
++    localHashtablePtr =
++        hashtable_alloc(geneLength, &hashSegment, &compareSegment, -1, -1);
++    assert(localHashtablePtr);
++    for (i = i_start; i < i_stop; ++i) {
++        void* segment = vector_at(segmentsContentsPtr, i);
++        hashtable_insert(localHashtablePtr, segment, segment);
++    }
++
++    {
++        list_t* chainPtr;
++        list_iter_t it;
++        ulong_t lock_idx;
++        long num = localHashtablePtr->numBucket;
++        for (i = 0; i < num; ++i) {
++            chainPtr = localHashtablePtr->buckets[i];
++            list_iter_reset(&it, chainPtr);
++
++            while (list_iter_hasNext(&it, chainPtr)) {
++                void* segment =
++                    (void*)((pair_t*)list_iter_next(&it, chainPtr))->firstPtr;
++                lock_idx = uniqueSegmentsPtr->hash(segment)
++                                        % uniqueSegmentsPtr->numBucket;
++                LOCK(lock_step1[lock_idx]);
++                {
++                    hashtable_insert(uniqueSegmentsPtr, segment, segment);
++                }
++                UNLOCK(lock_step1[lock_idx]);
++            }
++        }
++
++        hashtable_free(localHashtablePtr);
++    }
++#else
++    for (i = i_start; i < i_stop; i++) {
++        void* segment = vector_at(segmentsContentsPtr, i);
++        ulong_t lock_idx = uniqueSegmentsPtr->hash(segment)
++                                % uniqueSegmentsPtr->numBucket;
++        LOCK(lock_step1[lock_idx]);
++        hashtable_insert(uniqueSegmentsPtr, segment, segment);
++        UNLOCK(lock_step1[lock_idx]);
++    }
++#endif
++
++    thread_barrier_wait();
++
++    /*
++     * Step 2a: Iterate over unique segments and compute hashes.
++     *
++     * For the gene "atcg", the hashes for the end would be:
++     *
++     *     "t", "tc", and "tcg"
++     *
++     * And for the gene "tcgg", the hashes for the start would be:
++     *
++     *    "t", "tc", and "tcg"
++     *
++     * The names are "end" and "start" because if a matching pair is found,
++     * they are the substring of the end part of the pair and the start
++     * part of the pair respectively. In the above example, "tcg" is the
++     * matching substring so:
++     *
++     *     (end)    (start)
++     *     a[tcg] + [tcg]g  = a[tcg]g    (overlap = "tcg")
++     */
++#ifdef CHUNK_STEP2A
++        if (threadId == 0) {
++            printf("\nIf fine-grained lock is used,"
++                   "Step 2a is not processed in chunks.\n");
++        }
++#endif
++
++    /* uniqueSegmentsPtr is constant now */
++    numUniqueSegment = hashtable_getSize(uniqueSegmentsPtr);
++    entryIndex = 0;
++
++    if (threadId == 0) {
++        entryIndex = 0;
++        for (i = 0; i < uniqueSegmentsPtr->numBucket; ++i) {
++            list_t* chainPtr = uniqueSegmentsPtr->buckets[i];
++            list_iter_t it;
++            list_iter_reset(&it, chainPtr);
++
++            while (list_iter_hasNext(&it, chainPtr)) {
++                char* segment =
++                    (char*)((pair_t*)list_iter_next(&it, chainPtr))->firstPtr;
++                constructEntries[entryIndex].segment = segment;
++                ++entryIndex;
++            }
++        }
++    }
++
++    thread_barrier_wait();
++
++    {
++        /* Choose disjoint segments [i_start,i_stop) for each thread */
++        i_start = threadId * numUniqueSegment / numThread;
++        i_stop = (threadId + 1) * numUniqueSegment / numThread;
++
++        assert(i_start <= numUniqueSegment && i_stop <= numUniqueSegment);
++    }
++
++    for (i = i_start; i < i_stop; i++) {
++        constructEntry_t* constructEntryPtr;
++        char* segment;
++        long j;
++        ulong_t startHash;
++        bool_t status;
++        ulong_t lock_idx;
++
++        constructEntryPtr = &constructEntries[i];
++        segment = constructEntryPtr->segment;
++
++        /*
++         * Save hashes (sdbm algorithm) of segment substrings
++         *
++         * endHashes will be computed for shorter substrings after matches
++         * have been made (in the next phase of the code). This will reduce
++         * the number of substrings for which hashes need to be computed.
++         *
++         * Since we can compute startHashes incrementally, we go ahead
++         * and compute all of them here.
++         */
++        /* constructEntryPtr is local now */
++        constructEntryPtr->endHash = (ulong_t)hashString(&segment[1]);
++
++        startHash = 0;
++        for (j = 1; j < segmentLength; j++) {
++            startHash = (ulong_t)segment[j-1] +
++                        (startHash << 6) + (startHash << 16) - startHash;
++            lock_idx = startHash % startHashToConstructEntryTables[j]->numBucket;
++            LOCK(lock_step2a[j][lock_idx]);
++            status = table_insert(startHashToConstructEntryTables[j],
++                                  (ulong_t)startHash,
++                                  (void*)constructEntryPtr);
++            UNLOCK(lock_step2a[j][lock_idx]);
++            assert(status);
++        }
++
++        /*
++         * For looking up construct entries quickly
++         */
++        /* This process seems futile. Therefore, I commented it out. */
++#if 0
++        startHash = (ulong_t)segment[j-1] +
++                    (startHash << 6) + (startHash << 16) - startHash;
++        TM_BEGIN();
++        status = TMTABLE_INSERT(hashToConstructEntryTable,
++                                (ulong_t)startHash,
++                                (void*)constructEntryPtr);
++        TM_END();
++        assert(status);
++#endif
++    }
++
++    thread_barrier_wait();
++
++    /*
++     * Step 2b: Match ends to starts by using hash-based string comparison.
++     */
++    for (substringLength = segmentLength-1; substringLength > 0; substringLength--) {
++
++        table_t* startHashToConstructEntryTablePtr =
++            startHashToConstructEntryTables[substringLength];
++        list_t** buckets = startHashToConstructEntryTablePtr->buckets;
++        long numBucket = startHashToConstructEntryTablePtr->numBucket;
++
++        long index_start;
++        long index_stop;
++
++        {
++            /* Choose disjoint segments [index_start, index_stop) for each thread */
++            index_start = threadId * numUniqueSegment / numThread;
++            index_stop = (threadId + 1) * numUniqueSegment / numThread;
++
++            assert(index_start <= numUniqueSegment && index_stop <= numUniqueSegment);
++        }
++
++        /* Iterating over disjoint itervals in the range [0, numUniqueSegment) */
++        for (entryIndex = index_start;
++             entryIndex < index_stop;
++             entryIndex += endInfoEntries[entryIndex].jumpToNext)
++        {
++            if (!endInfoEntries[entryIndex].isEnd) {
++                continue;
++            }
++
++            /*  ConstructEntries[entryIndex] is local data */
++            constructEntry_t* endConstructEntryPtr =
++                &constructEntries[entryIndex];
++
++            constructEntry_t* endConstructEntryPtr_startPtr;
++            while (1) {
++                endConstructEntryPtr_startPtr = endConstructEntryPtr->startPtr;
++                LOCK(endConstructEntryPtr_startPtr->lock);
++                if (endConstructEntryPtr_startPtr == endConstructEntryPtr->startPtr) {
++                    break;
++                }
++                UNLOCK(endConstructEntryPtr_startPtr->lock);
++            }
++
++            char* endSegment = endConstructEntryPtr->segment;
++            ulong_t endHash = endConstructEntryPtr->endHash;
++
++            list_t* chainPtr = buckets[endHash % numBucket]; /* buckets: constant data */
++            list_iter_t it;
++            list_iter_reset(&it, chainPtr);
++
++            bool_t isLock_startCEP;
++
++            /* Linked list at chainPtr is constant */
++            while (list_iter_hasNext(&it, chainPtr)) {
++                isLock_startCEP = FALSE;
++
++                constructEntry_t* startConstructEntryPtr =
++                    (constructEntry_t*)list_iter_next(&it, chainPtr);
++                char* startSegment = startConstructEntryPtr->segment;
++                long newLength = 0;
++
++                if (endConstructEntryPtr_startPtr == startConstructEntryPtr ||
++                    (strncmp(startSegment,
++                             &endSegment[segmentLength - substringLength],
++                             substringLength) != 0))
++                {
++                    continue;
++                }
++
++                if ((startConstructEntryPtr != endConstructEntryPtr) &&
++                    (startConstructEntryPtr != endConstructEntryPtr_startPtr))
++                {
++                    LOCK(startConstructEntryPtr->lock);
++                    isLock_startCEP = TRUE;
++                }
++
++                /* Check if matches */
++                if (startConstructEntryPtr->isStart) {
++                    startConstructEntryPtr->isStart = FALSE;
++
++                    constructEntry_t* startConstructEntry_endPtr;
++                    constructEntry_t* endConstructEntry_startPtr;
++
++                    /* Update endInfo (appended something so no longer end) */
++                    endInfoEntries[entryIndex].isEnd = FALSE;
++
++                    /* Update segment chain construct info */
++                    startConstructEntry_endPtr =
++                        (constructEntry_t*)startConstructEntryPtr->endPtr;
++                    endConstructEntry_startPtr =
++                        (constructEntry_t*)endConstructEntryPtr->startPtr;
++
++                    assert(startConstructEntry_endPtr);
++                    assert(endConstructEntry_startPtr);
++                    startConstructEntry_endPtr->startPtr = endConstructEntry_startPtr;
++                    endConstructEntryPtr->nextPtr = startConstructEntryPtr;
++                    endConstructEntry_startPtr->endPtr = startConstructEntry_endPtr;
++                    endConstructEntryPtr->overlap = substringLength;
++                    newLength = (long)endConstructEntry_startPtr->length +
++                                (long)startConstructEntryPtr->length -
++                                substringLength;
++                    endConstructEntry_startPtr->length = newLength;
++                } /* if (matched) */
++
++                if (isLock_startCEP) {
++                    UNLOCK(startConstructEntryPtr->lock);
++                }
++
++                if (!endInfoEntries[entryIndex].isEnd) { /* if there was a match */
++                    break;
++                }
++            } /* iterate over chain */
++
++            UNLOCK(endConstructEntryPtr_startPtr->lock);
++        } /* for (endIndex < numUniqueSegment) */
++
++        thread_barrier_wait();
++
++        /*
++         * Step 2c: Update jump values and hashes
++         *
++         * endHash entries of all remaining ends are updated to the next
++         * substringLength. Additionally jumpToNext entries are updated such
++         * that they allow to skip non-end entries. Currently this is sequential
++         * because parallelization did not perform better.
++.        */
++
++        if (threadId == 0) {
++            if (substringLength > 1) {
++                long index = segmentLength - substringLength + 1;
++                /* initialization if j and i: with i being the next end after j=0 */
++                for (i = 1; !endInfoEntries[i].isEnd; i+=endInfoEntries[i].jumpToNext) {
++                    /* find first non-null */
++                }
++                /* entry 0 is handled seperately from the loop below */
++                endInfoEntries[0].jumpToNext = i;
++                if (endInfoEntries[0].isEnd) {
++                    constructEntry_t* constructEntryPtr = &constructEntries[0];
++                    char* segment = constructEntryPtr->segment;
++                    constructEntryPtr->endHash = (ulong_t)hashString(&segment[index]);
++                }
++                /* Continue scanning (do not reset i) */
++                for (j = 0; i < numUniqueSegment; i+=endInfoEntries[i].jumpToNext) {
++                    if (endInfoEntries[i].isEnd) {
++                        constructEntry_t* constructEntryPtr = &constructEntries[i];
++                        char* segment = constructEntryPtr->segment;
++                        constructEntryPtr->endHash = (ulong_t)hashString(&segment[index]);
++                        endInfoEntries[j].jumpToNext = MAX(1, (i - j));
++                        j = i;
++                    }
++                }
++                endInfoEntries[j].jumpToNext = i - j;
++            }
++        }
++
++        thread_barrier_wait();
++
++    } /* for (substringLength > 0) */
++
++
++    thread_barrier_wait();
++
++    /*
++     * Step 3: Build sequence string
++     */
++    if (threadId == 0) {
++
++        long totalLength = 0;
++
++        for (i = 0; i < numUniqueSegment; i++) {
++            constructEntry_t* constructEntryPtr = &constructEntries[i];
++            if (constructEntryPtr->isStart) {
++              totalLength += constructEntryPtr->length;
++            }
++        }
++
++        sequencerPtr->sequence = (char*)P_MALLOC((totalLength+1) * sizeof(char));
++        char* sequence = sequencerPtr->sequence;
++        assert(sequence);
++
++        char* copyPtr = sequence;
++        long sequenceLength = 0;
++
++        for (i = 0; i < numUniqueSegment; i++) {
++            constructEntry_t* constructEntryPtr = &constructEntries[i];
++            /* If there are several start segments, we append in arbitrary order  */
++            if (constructEntryPtr->isStart) {
++                long newSequenceLength = sequenceLength + constructEntryPtr->length;
++                assert( newSequenceLength <= totalLength );
++                copyPtr = sequence + sequenceLength;
++                sequenceLength = newSequenceLength;
++                do {
++                    long numChar = segmentLength - constructEntryPtr->overlap;
++                    if ((copyPtr + numChar) > (sequence + newSequenceLength)) {
++                        TM_PRINT0("ERROR: sequence length != actual length\n");
++                        break;
++                    }
++                    memcpy(copyPtr,
++                           constructEntryPtr->segment,
++                           (numChar * sizeof(char)));
++                    copyPtr += numChar;
++                } while ((constructEntryPtr = constructEntryPtr->nextPtr) != NULL);
++                assert(copyPtr <= (sequence + sequenceLength));
++            }
++        }
++
++        assert(sequence != NULL);
++        sequence[sequenceLength] = '\0';
++    }
++
++    TM_THREAD_EXIT();
++}
++
++#endif
+ 
+ /* =============================================================================
+  * sequencer_free
+@@ -628,20 +1097,20 @@
+     long i;
+ 
+     table_free(sequencerPtr->hashToConstructEntryTable);
+-    free(sequencerPtr->constructEntries);
++    P_FREE(sequencerPtr->constructEntries);
+     for (i = 1; i < sequencerPtr->segmentLength; i++) {
+         table_free(sequencerPtr->startHashToConstructEntryTables[i]);
+     }
+-    free(sequencerPtr->startHashToConstructEntryTables);
+-    free(sequencerPtr->endInfoEntries);
++    P_FREE(sequencerPtr->startHashToConstructEntryTables);
++    P_FREE(sequencerPtr->endInfoEntries);
+ #if 0
+     /* TODO: fix mixed sequential/parallel allocation */
+     hashtable_free(sequencerPtr->uniqueSegmentsPtr);
+     if (sequencerPtr->sequence != NULL) {
+-        free(sequencerPtr->sequence);
++        P_FREE(sequencerPtr->sequence);
+     }
+ #endif
+-    free(sequencerPtr);
++    P_FREE(sequencerPtr);
+ }
+ 
+ 
+diff -ruN -X /tmp/exc master/stamp/genome/sequencer.h pandora-supplement/genome/sequencer.h
+--- master/stamp/genome/sequencer.h	2026-10-29 16:21:09.424239864 +0900
++++ pandora-supplement/genome/sequencer.h	2026-10-29 16:21:09.426129614 +0900
+@@ -106,6 +106,7 @@
+ 
+     /* For deallocation */
+     long segmentLength;
++    long geneLength;
+ 
+ } sequencer_t;
+ 
+diff -ruN -X /tmp/exc master/stamp/genome/table.c pandora-supplement/genome/table.c
+--- master/stamp/genome/table.c	2026-10-29 16:21:09.424257971 +0900
++++ pandora-supplement/genome/table.c	2026-10-29 16:21:09.426140689 +0900
+@@ -88,12 +88,12 @@
+     table_t* tablePtr;
+     long i;
+ 
+-    tablePtr = (table_t*)malloc(sizeof(table_t));
++    tablePtr = (table_t*)P_MALLOC(sizeof(table_t));
+     if (tablePtr == NULL) {
+         return NULL;
+     }
+ 
+-    tablePtr->buckets = (list_t**)malloc(numBucket * sizeof(list_t*));
++    tablePtr->buckets = (list_t**)P_MALLOC(numBucket * sizeof(list_t*));
+     if (tablePtr->buckets == NULL) {
+         return NULL;
+     }
+@@ -181,7 +181,7 @@
+     }
+ #endif
+ 
+-    free(tablePtr);
++    P_FREE(tablePtr);
+ }
+ 
+ 

@@ -1,0 +1,8 @@
+workload,tinystm_LOC,fine_lock_LOC,coarse_lock_LOC,ratio_fine/tinystm,ratio_coarse/tinystm
+kmeans,291,325,291,1.117,1.0
+genome,452,470,452,1.04,1.0
+ssca2,368,387,368,1.052,1.0
+intruder,515,506,515,0.983,1.0
+vacation,1198,1315,1198,1.098,1.0
+labyrinth,520,555,520,1.067,1.0
+yada,1298,1298,1298,N/A,1.0

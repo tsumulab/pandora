@@ -1,0 +1,48 @@
+diff -ruN -X /tmp/exc_rt2 master/tinystm-1.0.5/Makefile pandora-supplement/tinySTM-1.0.5/Makefile
+--- master/tinystm-1.0.5/Makefile	2014-07-23 08:23:50.000000000 +0900
++++ pandora-supplement/tinySTM-1.0.5/Makefile	2026-07-28 09:08:09.696403000 +0900
+@@ -94,10 +94,10 @@
+ # from disabling them.
+ ########################################################################
+ 
+-# DEFINES += -DTM_STATISTICS
+-DEFINES += -UTM_STATISTICS
+-# DEFINES += -DTM_STATISTICS2
+-DEFINES += -UTM_STATISTICS2
++DEFINES += -DTM_STATISTICS
++# DEFINES += -UTM_STATISTICS
++DEFINES += -DTM_STATISTICS2
++# DEFINES += -UTM_STATISTICS2
+ 
+ ########################################################################
+ # Prevent duplicate entries in read/write sets when accessing the same
+@@ -205,8 +205,8 @@
+ # TLS_GLIBC: use the space reserved for TM in the GLIBC
+ ########################################################################
+ 
+-DEFINES += -DTLS_COMPILER
+-# DEFINES += -DTLS_POSIX
++# DEFINES += -DTLS_COMPILER
++DEFINES += -DTLS_POSIX
+ # DEFINES += -DTLS_DARWIN
+ # DEFINES += -DTLS_GLIBC
+ 
+diff -ruN -X /tmp/exc_rt2 master/tinystm-1.0.5/Makefile.common pandora-supplement/tinySTM-1.0.5/Makefile.common
+--- master/tinystm-1.0.5/Makefile.common	2014-07-23 08:23:50.000000000 +0900
++++ pandora-supplement/tinySTM-1.0.5/Makefile.common	2026-07-28 12:31:46.349534200 +0900
+@@ -34,9 +34,12 @@
+ # Solaris default memory allocator is quite slow, better use mtmalloc
+ # LDFLAGS += -lmtmalloc
+ 
+-# Disable additionnal checks from glibc (__longjmp_chk/__printf_chk)
+-# CPPFLAGS += -U_FORTIFY_SOURCE
+-# CPPFLAGS += -D_FORTIFY_SOURCE=0
++# Disable additionnal checks from glibc (__longjmp_chk/__printf_chk).
++# Required under libfibre: transactions abort via siglongjmp across user-level-thread
++# stacks, which glibc's _FORTIFY_SOURCE longjmp check misreads as an "uninitialized
++# stack frame" and aborts (intermittently, depending on stack layout).
++CPPFLAGS += -U_FORTIFY_SOURCE
++CPPFLAGS += -D_FORTIFY_SOURCE=0
+ # Enable multi-thread support in glibc
+ CPPFLAGS += -D_REENTRANT
+ 

@@ -1,0 +1,73 @@
+# libfibre changes: two build-time options (src/*/testoptions.h.default) and one
+# stack-alignment fix (src/runtime/Stack.S, at the end of this file).
+# Baseline: upstream libfibre (commit in MAPPING.md Sec. 1). libfibre's .cc/.h sources are
+# NOT modified. The two compile-time TESTING_* options disabled are:
+#   - TESTING_LOADBALANCING        (runtime):      worker load balancing via ISRS
+#   - TESTING_CLUSTER_POLLER_FIBRE (runtime-glue): per-cluster poller uses pthread, not a fibre
+# (Submodule checkout differences and the generated testoptions.h are omitted as noise.)
+#
+diff -ur master/libfibre/src/runtime/testoptions.h.default pandora-supplement/ULT/libfibre/src/runtime/testoptions.h.default
+--- master/libfibre/src/runtime/testoptions.h.default	2023-06-24 12:28:26.000000000 +0900
++++ pandora-supplement/ULT/libfibre/src/runtime/testoptions.h.default	2024-11-22 04:29:30.000000000 +0900
+@@ -6,7 +6,7 @@
+ 
+ // **** general options - alternative design
+ 
+-#define TESTING_LOADBALANCING         1 // enable load balancing using ISRS
++//#define TESTING_LOADBALANCING         1 // enable load balancing using ISRS
+ #define TESTING_GO_IDLEMANAGER        1 // Go/Rust-style idle management
+ //#define TESTING_DEFAULT_AFFINITY      1 // enable default affinity (no sticky stealing)
+ //#define TESTING_WAKE_FRED_WORKER      1 // idle manager: wake fred's worker vs any worker
+diff -ur master/libfibre/src/runtime-glue/testoptions.h.default pandora-supplement/ULT/libfibre/src/runtime-glue/testoptions.h.default
+--- master/libfibre/src/runtime-glue/testoptions.h.default	2023-06-24 12:28:26.000000000 +0900
++++ pandora-supplement/ULT/libfibre/src/runtime-glue/testoptions.h.default	2024-11-22 04:29:29.000000000 +0900
+@@ -3,7 +3,7 @@
+ //#define TESTING_WORKER_POLLER         1 // poll events during idle loop
+ //#define TESTING_WORKER_IO_URING       1 // process io_uring events during idle loop (Linux only)
+ 
+-#define TESTING_CLUSTER_POLLER_FIBRE  1 // per-cluster poller(s): fibre vs. pthread
++//#define TESTING_CLUSTER_POLLER_FIBRE  1 // per-cluster poller(s): fibre vs. pthread
+ #define TESTING_EVENTPOLL_TRYREAD     1 // try nonblocking input operation first
+ //#define TESTING_EVENTPOLL_EDGE        1 // use edge-trigger event polling
+ #define TESTING_EVENTPOLL_ONESHOT     1 // use oneshot event polling
+
+# Stack alignment fix (2026-11): stackInit/stubInit left a new fibre's stack 8 bytes off the
+# x86-64 ABI alignment (%rsp % 16 == 8 at function entry). Code that relies on it (SSE spills,
+# e.g. in some TCMalloc builds) can crash. One padding slot restores the ABI alignment.
+#
+--- master/libfibre/src/runtime/Stack.S
++++ pandora-artifact/ULT/libfibre/src/runtime/Stack.S
+@@ -40,16 +40,16 @@
+ .globl stackInit
+ .type stackInit, @function
+ stackInit:                  // stack, func, arg1, arg2, arg3 -> new stack
+-	movq %rsi, -64(%rdi)      // store 'func' for stub function (via %rbx)
+-	movq %rdx, -56(%rdi)      // store 'arg1' for stub function (via %r12)
+-	movq %rcx, -48(%rdi)      // store 'arg2' for stub function (via %r13)
+-	movq %r8,  -40(%rdi)      // store 'arg3' for stub function (via %r14)
+-	movq $0,   -32(%rdi)      // indirectly set %r15 to 0
+-	movq $0,   -24(%rdi)      // indirectly set %rbp to 0
++	movq %rsi, -72(%rdi)      // store 'func' for stub function (via %rbx)
++	movq %rdx, -64(%rdi)      // store 'arg1' for stub function (via %r12)
++	movq %rcx, -56(%rdi)      // store 'arg2' for stub function (via %r13)
++	movq %r8,  -48(%rdi)      // store 'arg3' for stub function (via %r14)
++	movq $0,   -40(%rdi)      // indirectly set %r15 to 0
++	movq $0,   -32(%rdi)      // indirectly set %rbp to 0
+ //movq $stubInit, -16(%rdi) // push stubInit function as return address
+-	leaq stubInit(%rip), %rax // alternative: use RIP-relative addressing
+-	movq %rax, -16(%rdi)      // to push stubInit function as return address
+-	leaq -64(%rdi), %rax      // return stack address, size 64: cf. STACK_PUSH
++	leaq stubInit(%rip), %rax // use RIP-relative addressing
++	movq %rax, -24(%rdi)      // to push stubInit function as return address
++	leaq -72(%rdi), %rax      // return stack address, size 72 (64 + 8 pad)
+ 	retq
+ .size stackInit, .-stackInit
+ 
+@@ -61,6 +61,7 @@
+ 	movq %r13, %rdx           // 'arg2'
+ 	movq %r14, %rcx           // 'arg3'
+ //movq %r15, %r8            // 'arg4' not needed
++	pushq %rbp                // alignment pad (keeps invokeFred entry %rsp % 16 == 8)
+ 	pushq %rbp                // previous %rip = 0 (fake stack frame)
+ 	pushq %rbp                // previous %rbp = 0
+ 	movq %rsp, %rbp           // set base pointer

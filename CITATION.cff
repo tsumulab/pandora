@@ -1,0 +1,53 @@
+cff-version: 1.2.0
+message: "If you use PANDORA, please cite the paper below."
+title: "PANDORA: A Transactional Memory Benchmark Suite"
+type: software
+license: GPL-3.0-or-later
+repository-code: "https://github.com/tsumulab/pandora"
+keywords:
+  - transactional memory
+  - benchmark
+  - STAMP
+  - software transactional memory
+  - hardware transactional memory
+  - user-level threads
+authors:
+  - family-names: Sato
+    given-names: Hiroki
+    affiliation: Nagoya Institute of Technology
+  - family-names: Koizumi
+    given-names: Toru
+    affiliation: Nagoya Institute of Technology
+    orcid: "https://orcid.org/0000-0003-0990-1916"
+  - family-names: Shioya
+    given-names: Ryota
+    affiliation: The University of Tokyo
+    orcid: "https://orcid.org/0000-0002-9309-5875"
+  - family-names: Goshima
+    given-names: Masahiro
+    affiliation: National Institute of Informatics
+    orcid: "https://orcid.org/0000-0002-1798-0565"
+  - family-names: Tsumura
+    given-names: Tomoaki
+    affiliation: Nagoya Institute of Technology
+    orcid: "https://orcid.org/0000-0003-2004-5284"
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.23908117
+    description: "Version evaluated in the PPoPP 2027 artifact evaluation"
+preferred-citation:
+  type: conference-paper
+  title: "Measuring Transactional Memory: PANDORA and the Division of Labor"
+  collection-title: "Proceedings of the 32nd ACM SIGPLAN Annual Symposium on Principles and Practice of Parallel Programming (PPoPP 2027)"
+  year: 2027
+  authors:
+    - family-names: Sato
+      given-names: Hiroki
+    - family-names: Koizumi
+      given-names: Toru
+    - family-names: Shioya
+      given-names: Ryota
+    - family-names: Goshima
+      given-names: Masahiro
+    - family-names: Tsumura
+      given-names: Tomoaki

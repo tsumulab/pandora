@@ -1,0 +1,2807 @@
+diff -ruN -x build ga/CMakeLists.txt gb/CMakeLists.txt
+--- ga/CMakeLists.txt	2026-11-09 11:50:07.801785491 +0900
++++ gb/CMakeLists.txt	2025-01-14 12:40:54.000000000 +0900
+@@ -12,6 +12,10 @@
+   set(CMAKE_BUILD_TYPE "Release")
+ endif()
+ 
++set(CMAKE_C_FLAGS_RELEASE "-O2")
++set(CMAKE_CXX_FLAGS_RELEASE "-O2")
++set(CMAKE_VERBOSE_MAKEFILE ON)
++
+ ###### Options (alternatively pass as options to cmake -DName=Value) ######
+ set(USE_HWTOPO ON CACHE BOOL "Enable hardware topology mapping for threads")
+ set(USE_GPROF OFF CACHE BOOL "Enable GCC profiling")
+@@ -30,6 +34,9 @@
+ set(USE_ABORT_POLICY_EAGER OFF CACHE BOOL "")
+ set(USE_ABORT_POLICY_DOUBLE OFF CACHE BOOL "")
+ 
++set(USE_INTEL OFF CACHE BOOL "Enable compiler option -mrtm[jaappao]")
++set(USE_POWER OFF CACHE BOOL "Enable compiler option -mhtm[jaappao]")
++
+ set(INSTALL_LIB_DIR lib CACHE PATH "Installation directory for libraries")
+ set(INSTALL_BIN_DIR bin CACHE PATH "Installation directory for executables")
+ set(INSTALL_INCLUDE_DIR include CACHE PATH "Installation directory for header files")
+@@ -120,7 +127,13 @@
+ 
+ # Enable architecture-specific optimizations
+ if(CMAKE_BUILD_TYPE MATCHES "Release" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
++  if (USE_POWER)
++    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mcpu=native")
++  elseif(USE_INTEL)
++    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
++  else()
++    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
++  endif()
+ endif()
+ 
+ # More warnings
+@@ -176,14 +189,22 @@
+ endif()
+ 
+ if(USE_HTM)
+-  if(CMAKE_CXX_COMPILER_ID MATCHES "XL")
+-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -qtm -qsmp=speculative")
+-    set(GALOIS_USE_HTM on)
+-    set(GALOIS_USE_SEQ_ONLY on)
+-    set(GALOIS_USE_LONGJMP on)
++  set(GALOIS_USE_HTM on)
++  set(GALOIS_USE_SEQ_ONLY on)
++  set(GALOIS_USE_LONGJMP on)
++
++  if(USE_POWER)
++    set(GALOIS_USE_POWER on)
++    add_definitions(-DGALOIS_USE_POWER)
++    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mhtm")
++  elseif(USE_INTEL)
++    set(GALOIS_USE_INTEL on)
++    add_definitions(-DGALOIS_USE_INTEL)
++    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mrtm")
+   else()
+-    message(FATAL_ERROR "Hardware transactional memory not supported")
++    # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -qtm -qsmp=speculative")
+   endif()
++  
+ endif()
+ 
+ if(USE_NO_WORKSTEALING)
+@@ -203,6 +224,7 @@
+   set(GALOIS_USE_TINYSTM on)
+   set(CMAKE_PREFIX_PATH ${TINYSTM_CMAKE_EXPORT} ${CMAKE_PREFIX_PATH})
+   find_package(tinystm REQUIRED NO_CMAKE_PACKAGE_REGISTRY)
++  include_directories(${tinystm_INCLUDE_DIRS})
+ endif()
+ 
+ # PThreads
+@@ -236,13 +258,19 @@
+   set(BOOST_ROOT $ENV{BOOST_DIR})
+ endif()
+ find_package(Boost 1.38.0 REQUIRED)
++
++set(Boost_INCLUDE_DIR "/project/camp/user/s_sakai/lib/boost_1_80_0/boost")
++
+ include_directories(${Boost_INCLUDE_DIR})
+ 
+ # C++11 features
+-find_package(CXX11)
+-if ("${CXX11_FLAGS}" STREQUAL "")
+-   message( FATAL_ERROR "Needs C++11")
+-endif()
++# ---- commented out because cmake_cxx_compliler_flag written in FindCXX11.cmake doesnt work if running on POWER [jaappao]
++# find_package(CXX11)
++# if ("${CXX11_FLAGS}" STREQUAL "")
++#    message( FATAL_ERROR "Needs C++11")
++# endif()
++set(CXX11_FLAGS "-std=c++11") # Added
++# -----
+ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CXX11_FLAGS}")
+ 
+ include(CheckEndian)
+@@ -297,7 +325,7 @@
+ include_directories(include)
+ 
+ add_subdirectory(src)
+-add_subdirectory(tools)
++# add_subdirectory(tools)
+ add_subdirectory(scripts)
+ if(NOT SKIP_COMPILE_APPS)
+   add_subdirectory(apps)
+diff -ruN -x build ga/README gb/README
+--- ga/README	2014-02-28 04:57:28.000000000 +0900
++++ gb/README	2025-02-18 18:34:08.000000000 +0900
+@@ -2,3 +2,8 @@
+  http://iss.ices.utexas.edu/?p=projects/galois/doc/current/getting_started
+ 
+ See build/readme.txt for build instructions
++
++###
++This is the Galois for the HTM.
++Use the other Galois to execute the STM. 
++###
+\ No newline at end of file
+diff -ruN -x build ga/include/Galois/Runtime/ActiveThreads.h gb/include/Galois/Runtime/ActiveThreads.h
+--- ga/include/Galois/Runtime/ActiveThreads.h	2014-02-28 04:56:22.000000000 +0900
++++ gb/include/Galois/Runtime/ActiveThreads.h	2025-01-14 12:41:06.000000000 +0900
+@@ -27,6 +27,7 @@
+ namespace Galois {
+ namespace Runtime {
+ extern unsigned int activeThreads;
++extern unsigned int serializationTreeHeight;
+ }
+ }
+ 
+diff -ruN -x build ga/include/Galois/Runtime/ParallelWork.h gb/include/Galois/Runtime/ParallelWork.h
+--- ga/include/Galois/Runtime/ParallelWork.h	2026-11-09 11:50:07.805785573 +0900
++++ gb/include/Galois/Runtime/ParallelWork.h	2025-01-14 12:41:07.000000000 +0900
+@@ -49,13 +49,13 @@
+ #include <functional>
+ 
+ #ifdef GALOIS_USE_HTM
+-#include <speculation.h>
++// #include "Galois/Runtime/htm.h"
++#include "Galois/Runtime/htm_ibm.h"
+ #endif
+ 
+ namespace Galois {
+ //! Internal Galois functionality - Use at your own risk.
+ namespace Runtime {
+-namespace {
+ 
+ template<bool Enabled> 
+ class LoopStatistics {
+@@ -63,41 +63,73 @@
+   unsigned long iterations;
+   const char* loopname;
+ 
+-#ifdef GALOIS_USE_HTM
+-  TmReport_s start;
+-  void init() { 
+-    if (LL::getTID()) return;
+-
+-    // Dummy transaction to ensure that tm_get_all_stats doesn't return
+-    // garbage 
+-#pragma tm_atomic
+-    {
+-      conflicts = 0;
+-    }
+-
+-    tm_get_all_stats(&start);
+-  }
+-
+-  void report() { 
+-    if (LL::getTID()) return;
+-    TmReport_s stop;
+-    tm_get_all_stats(&stop);
+-    reportStat(loopname, "HTMTransactions", 
+-        stop.totalTransactions - start.totalTransactions);
+-    reportStat(loopname, "HTMRollbacks", 
+-        stop.totalRollbacks - start.totalRollbacks);
+-    reportStat(loopname, "HTMSerializedJMV", 
+-        stop.totalSerializedJMV - start.totalSerializedJMV);
+-    reportStat(loopname, "HTMSerializedMAXRB", 
+-        stop.totalSerializedMAXRB - start.totalSerializedMAXRB);
+-    reportStat(loopname, "HTMSerializedOTHER", 
+-        stop.totalSerializedOTHER - start.totalSerializedOTHER);
+-    tm_print_stats();
+-  }
+-#else
++// #ifdef GALOIS_USE_HTM
++//   unsigned long HTMTxConflict;
++//   unsigned long HTMCapacity;
++//   unsigned long HTMIllegal;
++//   unsigned long HTMNested;
++//   unsigned long HTM0;
++//   #ifdef GALOIS_USE_POWER
++//   unsigned long HTMNonTxConflict;
++//   unsigned long HTMTLBConflict;
++//   unsigned long HTMImplSpecific;
++//   unsigned long HTMFetchConflict;
++//   unsigned long HTMPersistent;
++//   #endif
++//   unsigned long others;
++//   uint32_t lastCode;
++
++//   unsigned long HTMEnd_Tx;
++//   unsigned long HTMEnd_LOCK;
++//   unsigned long HTMEnd_LOCK_Per;
++//   unsigned long HTMEnd_LOCK_Tra;
++
++//   void init() { 
++//     conflicts = 0;
++//     HTMTxConflict = 0;
++//     HTMCapacity = 0;
++//     HTMIllegal = 0;
++//     HTMNested = 0;
++//     HTM0 = 0;
++//     #ifdef GALOIS_USE_POWER
++//     HTMNonTxConflict = 0;
++//     HTMTLBConflict = 0;
++//     HTMImplSpecific = 0;
++//     HTMFetchConflict = 0;
++//     HTMPersistent = 0;
++//     #endif
++//     others=0;
++//     lastCode=0;
++//     HTMEnd_Tx=0;
++//     HTMEnd_LOCK=0;
++//     HTMEnd_LOCK_Per=0;
++//     HTMEnd_LOCK_Tra=0;
++//   }
++
++//   void report() { 
++//     reportStat(loopname, "HTMTxConflict", HTMTxConflict);
++//     reportStat(loopname, "HTMCapacity", HTMCapacity);
++//     reportStat(loopname, "HTMIllegal", HTMIllegal);
++//     reportStat(loopname, "HTMNested", HTMNested);
++//     reportStat(loopname, "HTM0", HTM0);
++//     #ifdef GALOIS_USE_POWER
++//     reportStat(loopname, "HTMNonTxConflict", HTMNonTxConflict);
++//     reportStat(loopname, "HTMTLBConflict", HTMTLBConflict);
++//     reportStat(loopname, "HTMImplSpecific", HTMImplSpecific);
++//     reportStat(loopname, "HTMFetchConflict", HTMFetchConflict);
++//     reportStat(loopname, "HTMPersistent", HTMPersistent);
++//     #endif
++//     reportStat(loopname, "HTMothers", others);
++//     reportStat(loopname, "HTMlastCode", lastCode);
++//     reportStat(loopname, "HTMEnd_Tx", HTMEnd_Tx);
++//     reportStat(loopname, "HTMEnd_LOCK", HTMEnd_LOCK);
++//     reportStat(loopname, "HTMEnd_LOCK_Per", HTMEnd_LOCK_Per);
++//     reportStat(loopname, "HTMEnd_LOCK_Tra", HTMEnd_LOCK_Tra);
++//   }
++// #else
+   void init() { }
+   void report() { }
+-#endif
++// #endif
+ 
+ public:
+   explicit LoopStatistics(const char* ln) :conflicts(0), iterations(0), loopname(ln) { init(); }
+@@ -112,6 +144,69 @@
+   inline void inc_conflicts() {
+     ++conflicts;
+   }
++// #ifdef GALOIS_USE_HTM
++//   #ifdef GALOIS_USE_POWER
++//   inline void inc_abortreason(texasr_t abortcode) {
++//     // printf("%d\n", abortcode);
++//     // if (TX_ABORTED(abortcode)){
++//       if (IS_ABORT_TX_CONFLICT(abortcode)) {
++//         HTMTxConflict++;
++//       } else if (IS_ABORT_NON_TX_CONFLICT(abortcode)) {
++//         HTMNonTxConflict++;
++//       } else if (IS_ABORT_CAPACITY(abortcode)) {
++//         HTMCapacity++;
++//       } else if (IS_ABORT_ILLEGAL(abortcode)) {
++//         HTMIllegal++;
++//       } else if (IS_ABORT_NESTED(abortcode)) {
++//         HTMNested++;
++//       } else if (IS_ABORT_TLB_CONFLICT(abortcode)) {
++//         HTMTLBConflict++;
++//       } else if (IS_ABORT_FETCH_CONFLICT(abortcode)) {
++//         HTMFetchConflict++;
++//       } else if (IS_ABORT_PERSISTENT(abortcode)) {
++//         HTMPersistent++;
++//       } else if (IS_ABORT_IMPL_SPECIFIC(abortcode)) {
++//         HTMImplSpecific++;
++//       } else if (abortcode == 0) {
++//         HTM0++;
++//       } else {
++//         others++;
++//         lastCode = abortcode;
++//       }
++//     // }
++//   #elif GALOIS_USE_INTEL
++//   inline void inc_abortreason(unsigned int abortcode) {
++//     if (abortcode & _XABORT_CONFLICT) {
++//       HTMTxConflict++;
++//     } else if (abortcode & _XABORT_CAPACITY) {
++//       HTMCapacity++;
++//     } else if (abortcode & _XABORT_DEBUG) {
++//       HTMIllegal++;
++//     } else if (abortcode & _XABORT_NESTED) {
++//       HTMNested++;
++//     } else if (abortcode == 0) {
++//       HTM0++;
++//     } else {
++//       others++;
++//       lastCode = abortcode;
++//     }
++//   #endif
++//   }
++//   inline void inc_committype(bool islock) {
++//     if (islock) {
++//       HTMEnd_LOCK += 1;
++//     } else {
++//       HTMEnd_Tx += 1;
++//     }
++//   }
++//   inline void inc_whichCausedLock(bool isPersistent){
++//     if (isPersistent) {
++//       HTMEnd_LOCK_Per += 1;
++//     } else {
++//       HTMEnd_LOCK_Tra += 1;
++//     }
++//   }
++// #endif
+ };
+ 
+ 
+@@ -124,11 +219,24 @@
+ };
+ 
+ template<typename value_type>
++struct Item {
++  value_type val;
++  int retries;
++  Item(const value_type& value, const int ret): val(value), retries(ret) {}
++
++  #ifdef GALOIS_USE_HTM
++  unsigned int persistent_retries = 0;
++  unsigned int lock_retries = 0;
++  unsigned int transient_retries = 0;
++  Item(const value_type& value, const int ret, const unsigned int pRtr, const unsigned int lRtr, const unsigned int tRtr): val(value), retries(ret), persistent_retries(pRtr), lock_retries(lRtr), transient_retries(tRtr) {}
++  #endif
++};
++
++template<typename value_type>
+ class AbortHandler {
+-  struct Item { value_type val; int retries; };
+ 
+-  typedef typename WorkList::GFIFO<Item>::template rethread<false>::type LocalAbortedList;
+-  typedef WorkList::GFIFO<Item> AbortedList;
++  typedef typename WorkList::GFIFO<Item<value_type>>::template rethread<false>::type LocalAbortedList;
++  typedef WorkList::GFIFO<Item<value_type>> AbortedList;
+ 
+   PerThreadStorage<AbortedList> queues;
+   PerThreadStorage<LocalAbortedList> localQueues;
+@@ -137,7 +245,7 @@
+   /**
+    * Policy: serialize via tree over packages.
+    */
+-  void basicPolicy(const Item& item) {
++  void basicPolicy(const Item<value_type>& item) {
+     unsigned tid = LL::getTID();
+     unsigned package = LL::getPackageForSelf(tid);
+     queues.getRemote(LL::getLeaderForPackage(package / 2))->push(item);
+@@ -147,7 +255,7 @@
+    * Policy: try work 2X locally, then serialize via tree on package (trying
+    * twice at each level), then serialize via tree over packages.
+    */
+-  void doublePolicy(const Item& item) {
++  void doublePolicy(const Item<value_type>& item) {
+     if ((item.retries & 7) != 7) {
+       localQueues.getLocal()->push(item);
+       return;
+@@ -168,7 +276,7 @@
+    * Policy: try work 3X locally, then serialize via tree on package but
+    * try at most 3 levels, then serialize via tree over packages.
+    */
+-  void boundedPolicy(const Item& item) {
++  void boundedPolicy(const Item<value_type>& item) {
+     if (item.retries < 2) {
+       localQueues.getLocal()->push(item);
+       return;
+@@ -188,7 +296,7 @@
+   /**
+    * Retry locally only.
+    */
+-  void eagerPolicy(const Item& item) {
++  void eagerPolicy(const Item<value_type>& item) {
+     localQueues.getLocal()->push(item);
+   }
+ 
+@@ -199,32 +307,81 @@
+     useBasicPolicy = false;
+   }
+ 
+-  value_type& value(Item& item) const { return item.val; }
++  value_type& value(Item<value_type>& item) const { return item.val; }
+   value_type& value(value_type& val) const { return val; }
+ 
+-  void push(const value_type& val) {
+-    Item item = { val, 0 };
++  unsigned int getPersistentRetries(Item<value_type>& item) const {return item.persistent_retries; }
++  unsigned int getLockRetries(Item<value_type>& item) const {return item.lock_retries; }
++  unsigned int getTransientRetries(Item<value_type>& item) const {return item.transient_retries; }
++  
++  unsigned int getPersistentRetries(value_type& val) const {return 0; }
++  unsigned int getLockRetries(value_type& val) const {return 0; }
++  unsigned int getTransientRetries(value_type& val) const {return 0; }
++
++#ifdef GALOIS_USE_HTM
++  void push(const value_type& val, int* ar) {
++    Item<value_type> item(val, 1, 0, 0, 0);
++    if (*ar == 3) {
++      item.lock_retries += 1;
++    } else if (*ar == 2) {
++      item.persistent_retries += 1;
++    } else {
++      item.transient_retries += 1;
++    }
+     localQueues.getLocal()->push(item);
+   }
+ 
+-  void push(const Item& item) {
+-    Item newitem = { item.val, item.retries + 1 };
+-#if defined(GALOIS_USE_ABORT_POLICY_BOUNDED)
+-#  error "Not supported"
+-    boundedPolicy(newitem);
+-#elif defined(GALOIS_USE_ABORT_POLICY_EAGER)
+-    eagerPolicy(newitem);
+-#elif defined(GALOIS_USE_ABORT_POLICY_DOUBLE)
+-    doublePolicy(newitem);
+-#else
+-    if (useBasicPolicy) {
+-      basicPolicy(newitem);
+-      return;
++  void push(const Item<value_type>& item, int* ar) {
++    Item<value_type> newitem(item.val, item.retries+1, item.persistent_retries, item.lock_retries, item.transient_retries);
++    if (*ar == 3){
++      newitem.lock_retries += 1;
++    } else if (*ar == 2) {
++      newitem.persistent_retries += 1;
++    } else {
++      newitem.transient_retries += 1;
+     }
+-    doublePolicy(newitem);
+-#endif
++
++    #if defined(GALOIS_USE_ABORT_POLICY_BOUNDED)
++    #  error "Not supported"
++        boundedPolicy(newitem);
++    #elif defined(GALOIS_USE_ABORT_POLICY_EAGER)
++        eagerPolicy(newitem);
++    #elif defined(GALOIS_USE_ABORT_POLICY_DOUBLE)
++        doublePolicy(newitem);
++    #else
++        if (useBasicPolicy) {
++          basicPolicy(newitem);
++          return;
++        }
++        doublePolicy(newitem);
++    #endif
++  }
++#else
++    void push(const value_type& val) {
++    Item<value_type> item(val, 0);
++    localQueues.getLocal()->push(item);
+   }
+ 
++  void push(const Item<value_type>& item) {
++    Item<value_type> newitem(item.val, item.retries +1);
++
++    #if defined(GALOIS_USE_ABORT_POLICY_BOUNDED)
++    #  error "Not supported"
++        boundedPolicy(newitem);
++    #elif defined(GALOIS_USE_ABORT_POLICY_EAGER)
++        eagerPolicy(newitem);
++    #elif defined(GALOIS_USE_ABORT_POLICY_DOUBLE)
++        doublePolicy(newitem);
++    #else
++        if (useBasicPolicy) {
++          basicPolicy(newitem);
++          return;
++        }
++        doublePolicy(newitem);
++    #endif
++  }
++#endif
++
+   AbortedList* getQueue() { return queues.getLocal(); }
+   LocalAbortedList* getLocalQueue() { return localQueues.getLocal(); }
+ };
+@@ -239,13 +396,13 @@
+   typedef typename WorkListTy::template retype<value_type>::type WLTy;
+ #endif
+ 
+-  struct ThreadLocalData {
+-    FunctionTy function;
+-    UserContextAccess<value_type> facing;
+-    SimpleRuntimeContext ctx;
+-    LoopStatistics<ForEachTraits<FunctionTy>::NeedsStats> stat;
+-    ThreadLocalData(const FunctionTy& fn, const char* ln): function(fn), stat(ln) {}
+-  };
++struct ThreadLocalData {
++  FunctionTy function;
++  UserContextAccess<value_type> facing;
++  SimpleRuntimeContext ctx;
++  LoopStatistics<ForEachTraits<FunctionTy>::NeedsStats> stat;
++  ThreadLocalData(const FunctionTy& fn, const char* ln): function(fn), stat(ln) {}
++};
+ 
+   // NB: Place dynamically growing wl after fixed-size PerThreadStorage
+   // members to give higher likelihood of reclaiming PerThreadStorage
+@@ -275,11 +432,19 @@
+ 
+   template<typename Item>
+   GALOIS_ATTRIBUTE_NOINLINE
++#ifdef GALOIS_USE_HTM
++  void abortIteration(const Item& item, ThreadLocalData& tld, int* ar) {
++#else 
+   void abortIteration(const Item& item, ThreadLocalData& tld) {
++#endif
+     assert(ForEachTraits<FunctionTy>::NeedsAborts);
+     tld.ctx.cancelIteration();
+     tld.stat.inc_conflicts(); //Class specialization handles opt
++#ifdef GALOIS_USE_HTM
++    aborted.push(item, ar);
++#else
+     aborted.push(item);
++#endif
+     //clear push buffer
+     if (ForEachTraits<FunctionTy>::NeedsPush)
+       tld.facing.resetPushBuffer();
+@@ -288,7 +453,11 @@
+       tld.facing.resetAlloc();
+   }
+ 
++#ifdef GALOIS_USE_HTM
++  inline void doProcess(value_type& val, ThreadLocalData& tld, int* ar, unsigned int transient_counter, unsigned int persistent_counter, unsigned int lock_counter) {
++# else
+   inline void doProcess(value_type& val, ThreadLocalData& tld) {
++#endif
+ #ifdef GALOIS_USE_TINYSTM
+     // GCC 4.7, XLC optimize this variable away even in presence of setjmp
+     // make volatile to prevent this
+@@ -321,11 +490,16 @@
+ #  ifndef GALOIS_USE_LONGJMP
+ #    error "HTM must be used with GALOIS_USE_LONGJMP"
+ #  endif
+-#  pragma tm_atomic
++    // HTM_BEGIN(tld, ar, transient_counter, persistent_counter);
++    tbegin_ibm(0, ar, transient_counter, persistent_counter, lock_counter);
+ #endif
+     {
+       tld.function(val, tld.facing.data());
+     }
++#ifdef GALOIS_USE_HTM
++    // HTM_END(tld);
++    tend_ibm();
++#endif
+ 
+     clearReleasable();
+ #ifdef GALOIS_USE_TINYSTM
+@@ -337,14 +511,78 @@
+       auto ii = tld.facing.getPushBuffer().begin();
+       auto ee = tld.facing.getPushBuffer().end();
+       if (ii != ee) {
+-	wl.push(ii, ee);
+-	tld.facing.resetPushBuffer();
++        wl.push(ii, ee);
++        tld.facing.resetPushBuffer();
++      }
++    }
++    if (ForEachTraits<FunctionTy>::NeedsPIA)
++      tld.facing.resetAlloc();
++#else
++    commitIteration(tld); // HTMのときはほとんどなにもしてない
++    GALOIS_STM_END();
++#endif
++  }
++
++    inline void doProcessSimple(value_type& val, ThreadLocalData& tld) {
++#ifdef GALOIS_USE_TINYSTM
++    // GCC 4.7, XLC optimize this variable away even in presence of setjmp
++    // make volatile to prevent this
++    volatile bool first = true;
++    LL::compilerBarrier();
++#endif
++    tld.stat.inc_iterations();
++    // NB: STM transaction needs to include committing iteration
++    if (ForEachTraits<FunctionTy>::NeedsAborts)
++      tld.ctx.startIteration();
++
++    GALOIS_STM_BEGIN();
++
++#ifdef GALOIS_USE_TINYSTM
++    if (ForEachTraits<FunctionTy>::NeedsPush) {
++      tld.facing.resetPushBuffer();
++    }
++    if (first)
++      first = false;
++    else {
++#  ifndef GALOIS_USE_ABORT_POLICY_EAGER
++      abortIteration(val, tld);
++      GALOIS_STM_END();
++      forceAbort();
++#  endif
++    }
++#endif
++
++#ifdef GALOIS_USE_HTM
++#  ifndef GALOIS_USE_LONGJMP
++#    error "HTM must be used with GALOIS_USE_LONGJMP"
++#  endif
++    // HTM_BEGIN();
++#endif
++    {
++      tld.function(val, tld.facing.data());
++    }
++#ifdef GALOIS_USE_HTM
++    // HTM_END();
++#endif
++
++    clearReleasable();
++#ifdef GALOIS_USE_TINYSTM
++    // need to inline commit iteration to form correct tinySTM transaction
++    if (ForEachTraits<FunctionTy>::NeedsAborts)
++      tld.ctx.commitIteration();
++    GALOIS_STM_END();
++    if (ForEachTraits<FunctionTy>::NeedsPush) {
++      auto ii = tld.facing.getPushBuffer().begin();
++      auto ee = tld.facing.getPushBuffer().end();
++      if (ii != ee) {
++        wl.push(ii, ee);
++        tld.facing.resetPushBuffer();
+       }
+     }
+     if (ForEachTraits<FunctionTy>::NeedsPIA)
+       tld.facing.resetAlloc();
+ #else
+-    commitIteration(tld);
++    commitIteration(tld); // HTMのときはほとんどなにもしてない
+     GALOIS_STM_END();
+ #endif
+   }
+@@ -355,7 +593,7 @@
+     if (p)
+       workHappened = true;
+     while (p) {
+-      doProcess(*p, tld);
++      doProcessSimple(*p, tld);
+       p = wl.pop();
+     }
+     return workHappened;
+@@ -370,21 +608,43 @@
+     Galois::optional<typename WL::value_type> p = lwl.pop();
+     unsigned num = 0;
+     int result = 0;
+-    if (p)
++#ifdef GALOIS_USE_HTM
++    int ar = -1;
++#endif
++    // printf("hello\n");
++    if (p) {
+       workHappened = true;
++    }
+ #ifdef GALOIS_USE_LONGJMP
+     if ((result = setjmp(hackjmp)) == 0) {
+ #else
+     try {
+ #endif
+       while (p) {
+-	doProcess(aborted.value(*p), tld);
+-	if (limit) {
+-	  ++num;
+-	  if (num == limit)
+-	    break;
+-	}
+-	p = lwl.pop();
++#ifdef GALOIS_USE_HTM
++        // bool thisItemNeedsToFallback = false;
++        unsigned int persistentRet = aborted.getPersistentRetries(*p);
++        unsigned int lockRet = aborted.getLockRetries(*p);
++        unsigned int transientRet = aborted.getTransientRetries(*p);
++        // if (persistentRet >= 2) {
++        //   thisItemNeedsToFallback = true;
++        // }
++        // if (lockRet >= 16) {
++        //   thisItemNeedsToFallback = true;
++        // }
++        // if (transientRet >= 200) {
++        //   thisItemNeedsToFallback = true;
++        // }
++        doProcess(aborted.value(*p), tld, &ar, transientRet, persistentRet, lockRet);
++#else
++        doProcess(aborted.value(*p), tld);
++#endif
++        if (limit) {
++          ++num;
++          if (num == limit)
++            break;
++	      }
++	      p = lwl.pop();
+       }
+ #ifdef GALOIS_USE_LONGJMP
+     } else { 
+@@ -404,7 +664,11 @@
+     case CONFLICT:
+ #ifndef GALOIS_USE_TINYSTM
+       // Handled inside 
++      #ifdef GALOIS_USE_HTM
++      abortIteration(*p, tld, &ar);
++      #else
+       abortIteration(*p, tld);
++      #endif
+ #endif
+       break;
+     default:
+@@ -480,10 +744,10 @@
+ 
+   void operator()() {
+     bool isLeader = LL::isPackageLeaderForSelf(LL::getTID());
+-    bool couldAbort = ForEachTraits<FunctionTy>::NeedsAborts && activeThreads > 1;
+-#ifdef GALOIS_USE_HTM
+-    couldAbort = false;
+-#endif
++    bool couldAbort = ForEachTraits<FunctionTy>::NeedsAborts && activeThreads >= 1;
++// #ifdef GALOIS_USE_HTM
++//     couldAbort = false;
++// #endif
+     if (couldAbort && isLeader)
+       go<true, true>();
+     else if (couldAbort && !isLeader)
+@@ -565,8 +829,6 @@
+   inGaloisForEach = false;
+ }
+ 
+-} // end namespace anonymous
+-
+ void preAlloc_impl(int num);
+ 
+ } // end namespace Runtime
+diff -ruN -x build ga/include/Galois/Runtime/bluegeneq/htm_bgq.h gb/include/Galois/Runtime/bluegeneq/htm_bgq.h
+--- ga/include/Galois/Runtime/bluegeneq/htm_bgq.h	1970-01-01 09:00:00.000000000 +0900
++++ gb/include/Galois/Runtime/bluegeneq/htm_bgq.h	2025-01-14 12:41:07.000000000 +0900
+@@ -0,0 +1,10 @@
++#ifndef _HTM_INCLUDE_
++#define _HTM_INCLUDE_
++
++#include <speculation.h>
++
++#define htm_begin() _Pragma ("tm_atomic") {
++#define htm_end()   }
++#define htm_abort() abort()
++
++#endif
+\ No newline at end of file
+diff -ruN -x build ga/include/Galois/Runtime/htm.h gb/include/Galois/Runtime/htm.h
+--- ga/include/Galois/Runtime/htm.h	1970-01-01 09:00:00.000000000 +0900
++++ gb/include/Galois/Runtime/htm.h	2025-01-14 12:41:07.000000000 +0900
+@@ -0,0 +1,212 @@
++#ifndef _HTM_H
++#define _HTM_H
++
++#if defined(__x86_64__) || defined(__i386)
++	#define L1_CACHE_SIZE   (32L*1024L)
++	#define L1_BLOCK_SIZE           64L // 64 bytes per block/line
++	#define L1_BLOCKS_PER_SET        8L // 8-way set associative
++	#define L1_WORDS_PER_BLOCK       8L
++	#define L1_NUM_SETS          (L1_CACHE_SIZE/(L1_BLOCK_SIZE*L1_BLOCKS_PER_SET))
++	#define L1_SET_BLOCK_OFFSET  ((L1_NUM_SETS*L1_BLOCK_SIZE)/sizeof(long))
++	#define CACHE_ALIGNMENT		   (L1_NUM_SETS*L1_BLOCK_SIZE)
++#else /* PowerPC */
++	#define L1_CACHE_SIZE   (512L*1024L)
++	#define L1_BLOCK_SIZE          128L // 128 bytes per block/line
++	#define L1_BLOCKS_PER_SET        8L // 8-way set associative
++	#define L1_WORDS_PER_BLOCK      16L
++	#define L1_NUM_SETS          (L1_CACHE_SIZE/(L1_BLOCK_SIZE*L1_BLOCKS_PER_SET))
++	#define L1_SET_BLOCK_OFFSET  ((L1_NUM_SETS*L1_BLOCK_SIZE)/sizeof(long))
++	#define CACHE_ALIGNMENT			 (L1_NUM_SETS*L1_BLOCK_SIZE)
++#endif /* PowerPC */
++
++#ifndef __ALIGN__
++#define __ALIGN__ __attribute__((aligned(CACHE_ALIGNMENT)))
++#endif
++
++#if defined(__powerpc__) || defined(__ppc__) || defined(__PPC__)
++
++#include <htmintrin.h>
++#include <pthread.h>
++#include "power9/htm_power9.h"
++
++/*
++ * ロック
++ */
++#define lock_t volatile long
++#define LOCK_INITIALIZER 0
++
++#define IS_LOCKED(l) (__atomic_load_n(l,__ATOMIC_SEQ_CST) == 1)
++#define LOCK(l) while (__atomic_exchange_n(l,1, __ATOMIC_SEQ_CST)) pthread_yield()
++#define UNLOCK(l) __atomic_store_n(l, 0, __ATOMIC_SEQ_CST)
++
++namespace Galois{
++namespace Runtime{
++
++static lock_t __htm_global_lock __ALIGN__ = LOCK_INITIALIZER;
++
++enum AbortReason {
++    NOT_ABORTED = 0,
++    LOCK_CONFLICT = 1,
++    PERSISTENT = 2,
++    TRANSIENT = 3
++};
++
++}
++}
++
++
++/*
++ * HTM operations
++ */
++
++#define ABORT_PERSISTENT		      (1 << (31-7))
++#define ABORT_ILLEGAL		          (1 << (31-8))
++#define ABORT_NESTED		          (1 << (31-9))
++#define ABORT_CAPACITY	          (1 << (31-10))
++#define ABORT_SUSPENDED_CONFLICT	(1 << (31-11))
++#define ABORT_NON_TX_CONFLICT	    (1 << (31-12))
++#define ABORT_TX_CONFLICT	        (1 << (31-13))
++#define ABORT_TLB_CONFLICT	      (1 << (31-14))
++#define ABORT_IMPL_SPECIFIC	      (1 << (31-15))
++#define ABORT_FETCH_CONFLICT	    (1 << (31-16))
++#define ABORT_EXPLICIT	          (1 << (31-31))
++// #define HTM_ABORT_PERSISTENT(s)   ((s & ABORT_PERSISTENT) && !(s & ABORT_EXPLICIT))
++#define HTM_ABORT_PERSISTENT(s)   (IS_ABORT_PERSISTENT(s))
++#define HTM_ABORT_REASON(s) ((texasr_t)__builtin_get_texasr())
++
++#define HTM_BEGIN(tld, ar, transient_ctr, persistent_ctr) do{ \
++                                uint32_t __tx_status = __builtin_tbegin(0); \
++                                if (__tx_status != 0) { \
++                                    if (IS_LOCKED(&__htm_global_lock)) { \
++                                        __builtin_tabort(0xab); \
++                                    } \
++                                    break; \
++                                } else { \
++                                    if (IS_LOCKED(&__htm_global_lock)) { \
++                                        ar = LOCK_CONFLICT; \
++                                        while( IS_LOCKED(&__htm_global_lock) ) pthread_yield(); \
++                                    } else { \
++                                        texasr_t abort_reason __ALIGN__ = HTM_ABORT_REASON(__tx_status); \
++                                        tld.stat.inc_abortreason(abort_reason); \
++                                        if (HTM_ABORT_PERSISTENT(abort_reason)) { \
++                                            ar = PERSISTENT; \
++                                        } else { \
++                                            ar = TRANSIENT; \
++                                        } \
++                                        if (ar==TRANSIENT && transient_ctr >= (serializationTreeHeight * 7)) { \
++                                            tld.stat.inc_whichCausedLock(false); \
++                                            LOCK(&__htm_global_lock); \
++                                            break; \
++                                        } \
++                                        if (ar==PERSISTENT && persistent_ctr >= 0) { \
++                                            tld.stat.inc_whichCausedLock(true); \
++                                            LOCK(&__htm_global_lock); \
++                                            break; \
++                                        } \
++                                    } \
++                                    forceAbort(); \
++                                } \
++                            } while(0)
++
++#define HTM_END(tld)   do { \
++                        if (IS_LOCKED(&__htm_global_lock)) { \
++                            UNLOCK(&__htm_global_lock); \
++                            tld.stat.inc_committype(true); \
++                        } else { \
++                            __builtin_tend(0); \
++                            tld.stat.inc_committype(false); \
++                        } \
++                    } while(0)
++
++#elif defined(__x86_64__) || defined(__i386)
++
++/*
++ * ロック
++*/
++#include <immintrin.h>
++#include <pthread.h>
++#include "intel/htm_intel.h"
++
++#define lock_t volatile long
++#define LOCK_INITIALIZER 0
++
++#define IS_LOCKED(l) (__atomic_load_n(l, __ATOMIC_SEQ_CST) == 1)
++#define LOCK(l) while (__atomic_exchange_n(l,1, __ATOMIC_SEQ_CST)) pthread_yield()
++
++#define UNLOCK(l) __atomic_store_n(l, 0, __ATOMIC_RELEASE)
++
++namespace Galois{
++namespace Runtime{
++
++static lock_t __htm_global_lock __ALIGN__ = LOCK_INITIALIZER;
++
++enum AbortReason {
++    NOT_ABORTED = 0,
++    LOCK_CONFLICT = 1,
++    PERSISTENT = 2,
++    TRANSIENT = 3
++};
++
++}
++}
++
++
++/*
++ * HTM operations
++*/
++
++#define HTM_ABORT_PERSISTENT(s) (!(s & _XABORT_RETRY))
++#define HTM_ABORT_REASON(s) (s & 0x3E)
++
++#define HTM_BEGIN(tld, ar, transient_ctr, persistent_ctr) do{ \
++                                uint32_t __tx_status = _xbegin(); \
++                                if (__tx_status == _XBEGIN_STARTED) { \
++                                    if (IS_LOCKED(&__htm_global_lock)) { \
++                                        _xabort(0xab); \
++                                    } \
++                                    break; \
++                                } else { \
++                                    if (IS_LOCKED(&__htm_global_lock)) { \
++                                        ar = LOCK_CONFLICT; \
++                                        while( IS_LOCKED(&__htm_global_lock) ) pthread_yield(); \
++                                    } else { \
++                                        uint32_t abort_reason __ALIGN__ = HTM_ABORT_REASON(__tx_status); \
++                                        tld.stat.inc_abortreason(abort_reason); \
++                                        if (HTM_ABORT_PERSISTENT(__tx_status)) { \
++                                            ar = PERSISTENT; \
++                                        } else { \
++                                            ar = TRANSIENT; \
++                                        } \
++                                        if (ar==TRANSIENT && transient_ctr >= (serializationTreeHeight * 7)) { \
++                                            tld.stat.inc_whichCausedLock(false); \
++                                            LOCK(&__htm_global_lock); \
++                                            break; \
++                                        } \
++                                        if (ar==PERSISTENT && persistent_ctr >= 0) { \
++                                            tld.stat.inc_whichCausedLock(true); \
++                                            LOCK(&__htm_global_lock); \
++                                            break; \
++                                        } \
++                                    } \
++                                    forceAbort(); \
++                                } \
++                            } while(0)
++
++#define HTM_END(tld)   do { \
++                        if (IS_LOCKED(&__htm_global_lock)) { \
++                            UNLOCK(&__htm_global_lock); \
++                            tld.stat.inc_committype(true); \
++                        } else { \
++                            _xend(); \
++                            tld.stat.inc_committype(false); \
++                        } \
++                    } while(0)
++
++#elif defined(__bgq__)
++
++// TODO とりあえず出すときには書いておくこと
++
++#endif // EACH_ARCHITECTURE
++
++#endif // _HTM_H
++
+diff -ruN -x build ga/include/Galois/Runtime/htm_ia32_stat.h gb/include/Galois/Runtime/htm_ia32_stat.h
+--- ga/include/Galois/Runtime/htm_ia32_stat.h	1970-01-01 09:00:00.000000000 +0900
++++ gb/include/Galois/Runtime/htm_ia32_stat.h	2025-01-14 12:41:07.000000000 +0900
+@@ -0,0 +1,8 @@
++/* Copyright (c) IBM Corp. 2014. */
++HTM_IA32_STAT(GLOBAL_LOCK_ACQUIRED)
++HTM_IA32_STAT(XABORT)
++HTM_IA32_STAT(TRANSIENT)
++HTM_IA32_STAT(MEMADDR_CONFLICT)
++HTM_IA32_STAT(BUFFER_OVERFLOW)
++HTM_IA32_STAT(HIT_DEBUG_BREAKPOINT)
++HTM_IA32_STAT(DURING_NESTED_TRANSACTION)
+diff -ruN -x build ga/include/Galois/Runtime/htm_ibm.h gb/include/Galois/Runtime/htm_ibm.h
+--- ga/include/Galois/Runtime/htm_ibm.h	1970-01-01 09:00:00.000000000 +0900
++++ gb/include/Galois/Runtime/htm_ibm.h	2025-01-14 12:41:07.000000000 +0900
+@@ -0,0 +1,15 @@
++/* Copyright (c) IBM Corp. 2014. */
++#ifndef HTM_IBM_H
++#define HTM_IBM_H 1
++
++extern void tm_startup_ibm();
++extern void tm_shutdown_ibm();
++
++extern void tm_thread_enter_ibm();
++extern void tm_thread_exit_ibm();
++
++extern void tbegin_ibm(int region_id, int* ar, int tAbortCtr, int pAbortCtr, int lAbortCtr);
++extern void tend_ibm();
++extern void tabort_ibm();
++
++#endif
+diff -ruN -x build ga/include/Galois/Runtime/htm_ppc_stat.h gb/include/Galois/Runtime/htm_ppc_stat.h
+--- ga/include/Galois/Runtime/htm_ppc_stat.h	1970-01-01 09:00:00.000000000 +0900
++++ gb/include/Galois/Runtime/htm_ppc_stat.h	2025-01-14 12:41:07.000000000 +0900
+@@ -0,0 +1,13 @@
++/* Copyright (c) IBM Corp. 2014. */
++HTM_PPC_STAT(Global_Lock_Acquired)
++/* See 5.4.2 */
++HTM_PPC_STAT(Failure_Persistent)
++HTM_PPC_STAT(Disallowed)
++HTM_PPC_STAT(Nesting_Overflow)
++HTM_PPC_STAT(Footprint_Overflow)
++HTM_PPC_STAT(Self_Induced_Conflict)
++HTM_PPC_STAT(Non_Transactional_Conflict)
++HTM_PPC_STAT(Transaction_Conflict)
++HTM_PPC_STAT(Translation_Invalidation_Conflict)
++HTM_PPC_STAT(Implementation_Specific)
++HTM_PPC_STAT(Instruction_Fetch_Conflict)
+diff -ruN -x build ga/include/Galois/Runtime/htm_util.h gb/include/Galois/Runtime/htm_util.h
+--- ga/include/Galois/Runtime/htm_util.h	1970-01-01 09:00:00.000000000 +0900
++++ gb/include/Galois/Runtime/htm_util.h	2025-01-14 12:41:07.000000000 +0900
+@@ -0,0 +1,193 @@
++/* Copyright (c) IBM Corp. 2014. */
++#ifndef _HTM_UTIL_H
++#define _HTM_UTIL_H
++
++#include <stdint.h>
++#if defined(__370__) && __COMPILER_VER__ >= 0x410d0000
++#include <builtins.h>
++#endif
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++typedef struct {
++#if defined(__370__)
++  uint8_t format;
++  uint8_t flags;
++  uint16_t reserved0;
++  uint16_t reserved1;
++  uint16_t transactionNestingDepth;
++  uint64_t transactionAbortCode;
++  uint64_t conflictToken;
++  uint64_t abortedTransactionInstructionAddress;
++  uint8_t EAID;
++  uint8_t DXC;
++  uint16_t reserved2;
++  uint32_t programInterruptionIdentification;
++  uint64_t translationExceptionIdentification;
++  uint64_t breakingEventAddress;
++  uint64_t reserved3[8];
++  uint32_t reserved4;
++  uint16_t reserved5;
++  uint8_t reserved6;
++  uint8_t LSUAbortCode;
++  uint64_t generalRegisters[16];
++#elif defined(__x86_64)
++  uint64_t transactionAbortCode;
++#elif defined(__PPC__) || defined(_ARCH_PPC)
++  uint64_t transactionAbortCode;
++  uint64_t abortedTransactionInstructionAddress;
++#endif
++} TransactionDiagnosticInfo;
++
++/*
++  int tbegin(TransactionDiagnosticInfo *diag);
++  Returns 0 for success
++          1 for inderminate
++          2 for transient abort
++	  3 for persistent abort
++ */
++
++#if defined(__370__)
++
++int tbegin(TransactionDiagnosticInfo *diag);
++#if __COMPILER_VER__ >= 0x410d0000
++#define tend() __TM_end()
++#else
++void tend();
++#endif
++void ctend(volatile int64_t *addr);
++void tabort(uint64_t code);
++void tabort_no_abend_in_no_tx(uint64_t code);
++#if __COMPILER_VER__ >= 0x410d0000
++/* addr must be 8-byte aligned */
++#define non_tx_store(addr, data) __TM_non_transactional_store((addr), (long long)data)
++#else
++void non_tx_store(int64_t *addr, int64_t data);
++#endif
++#if __COMPILER_VER__ >= 0x410d0000
++#define get_transaction_nesting_depth() __TM_nesting_depth(NULL)
++#else
++int get_transaction_nesting_depth();
++#endif
++void save_preserved_fpr(uint64_t *addr);
++void restore_preserved_fpr(uint64_t *addr);
++
++#define NUM_HTM_FAILURE_REASONS 19
++
++#elif defined(__x86_64)
++
++#define XABORT_EXPLICIT	0x01
++#define XABORT_RETRY	0x02
++#define XABORT_CONFLICT	0x04
++#define XABORT_CAPACITY	0x08
++#define XABORT_DEBUG	0x10
++#define XABORT_NESTED	0x20
++
++static inline int tbegin(TransactionDiagnosticInfo *diag)
++{
++  int xbegin_result;
++
++  xbegin_result = 0xffffffff;
++  asm volatile("mov %0, %%eax;"
++	       ".byte 0xc7; .byte 0xf8; .int 0x00000000;" /* xbegin */
++	       "mov %%eax, %0"
++	       : "+r"(xbegin_result)
++	       :
++	       : "%eax");
++  if (xbegin_result == 0xffffffff)
++    return 0;
++  else {
++    diag->transactionAbortCode = xbegin_result;
++    if (xbegin_result & XABORT_RETRY)
++      return 2;
++    return 3;
++  }
++}
++
++#define tend() do {							\
++    asm volatile(".byte 0x0f; .byte 0x01; .byte 0xd5" :: ); /* xend */	\
++  } while (0)
++
++#define tabort(code) do {						\
++    asm volatile(".byte 0xc6; .byte 0xf8; .byte 0xff" :: ); /* xabort */ \
++  } while (0)
++
++#define NUM_HTM_FAILURE_REASONS 7
++
++#elif defined(__PPC__) || defined(_ARCH_PPC)
++
++static inline int tbegin(TransactionDiagnosticInfo *diag)
++{
++  uint32_t tbegin_status;
++
++  asm volatile(".long 0x7c00051d;"
++	       "mfcr %0"
++	       :"=r"(tbegin_status): : "cr0");	// tbegin. 0
++  if (! (tbegin_status & 0x20000000U))
++    return 0;
++  else {
++#ifdef _ARCH_PPC64
++    uint64_t texasr;
++    uint64_t tfiar;
++
++    asm volatile("mfspr %0,130;"
++		 "mfspr %1,129"
++		 :"=r"(texasr), "=r"(tfiar): );
++    diag->transactionAbortCode = texasr;
++#else
++    uint32_t texasr;
++    uint32_t texasru;
++    uint32_t tfiar;
++
++    asm volatile("mfspr %0,130;"
++		 "mfspr %1,131;"
++		 "mfspr %2,129"
++		 :"=r"(texasr), "=r"(texasru), "=r"(tfiar): );
++    diag->transactionAbortCode = (uint64_t)texasru << 32 | (uint64_t)texasr;
++#endif
++    diag->abortedTransactionInstructionAddress = (uint64_t)tfiar & ~0x3ULL;
++    if (texasr & 0x0100000000000000ULL)
++      return 3;
++    return 2;
++  }
++}
++
++/* tend. 0 */
++#define tend() do {				\
++    asm volatile(".long 0x7c00055d":::"cr0" );	\
++  } while (0)
++
++static inline void tabort(uint64_t code)
++{
++  uint64_t int_code = code << 56;
++  asm volatile("mr 3,%0;"
++	       ".long 0x7c03071d": : "r" (int_code) : "r3", "cr0"); // tabort. 3
++  //asm(".long 0x7c00071d":::"cr0" ); // tabort. 0
++}
++
++#define tsuspend() do {				\
++    asm volatile (".long 0x7C0005DD");		\
++  } while (0)
++
++#define tresume() do {				\
++    asm volatile (".long 0x7C2005DD");		\
++  } while (0)
++
++#define NUM_HTM_FAILURE_REASONS 12
++
++#else
++
++#error
++
++#endif
++
++void countHTMFailures(TransactionDiagnosticInfo *diag, uint64_t *counters);
++const char *getHTMFailureName(int id);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* _HTM_UTIL_H */
+diff -ruN -x build ga/include/Galois/Runtime/intel/htm_intel.h gb/include/Galois/Runtime/intel/htm_intel.h
+--- ga/include/Galois/Runtime/intel/htm_intel.h	1970-01-01 09:00:00.000000000 +0900
++++ gb/include/Galois/Runtime/intel/htm_intel.h	2025-01-14 12:41:07.000000000 +0900
+@@ -0,0 +1,8 @@
++#ifndef _HTM_INCLUDE_
++#define _HTM_INCLUDE_
++
++#include <immintrin.h>
++
++#define	TM_ABORT_TYPE u_int32_t
++
++#endif
+\ No newline at end of file
+diff -ruN -x build ga/include/Galois/Runtime/mfence.h gb/include/Galois/Runtime/mfence.h
+--- ga/include/Galois/Runtime/mfence.h	1970-01-01 09:00:00.000000000 +0900
++++ gb/include/Galois/Runtime/mfence.h	2025-01-14 12:41:08.000000000 +0900
+@@ -0,0 +1,22 @@
++/* Copyright (c) IBM Corp. 2014. */
++
++#if defined(__x86_64__)
++#include <emmintrin.h>
++#endif
++/* requires C99 */
++static inline void memory_fence(void) {
++#if defined(__370__)
++    /* Nothing to do */
++#elif defined(__PPC__) && defined(__IBMC__)
++  __lwsync();
++#elif defined(__PPC__) || defined(_ARCH_PPC)
++    asm volatile("lwsync" : : );
++#elif defined(__x86_64__)
++  _mm_sfence();
++#elif defined(__GNUC__) || defined(__IBMC__)
++    __sync_synchronize();
++#else
++#error
++#endif
++}
++
+diff -ruN -x build ga/include/Galois/Runtime/power9/htm_power9.h gb/include/Galois/Runtime/power9/htm_power9.h
+--- ga/include/Galois/Runtime/power9/htm_power9.h	1970-01-01 09:00:00.000000000 +0900
++++ gb/include/Galois/Runtime/power9/htm_power9.h	2025-01-14 12:41:08.000000000 +0900
+@@ -0,0 +1,21 @@
++#ifndef _HTM_INCLUDE_
++#define _HTM_INCLUDE_
++
++#include <htmxlintrin.h>
++
++#define	TM_ABORT_TYPE texasr_t
++
++#define TX_ABORTED(s)	_TEXASR_ABORT(s)
++#define IS_ABORT_TX_CONFLICT(s)	  _TEXASR_TRANSACTION_CONFLICT(s)
++#define IS_ABORT_CAPACITY(s)	          _TEXASR_FOOTPRINT_OVERFLOW(s)
++#define IS_ABORT_ILLEGAL(s)		          _TEXASR_DISALLOWED(s)
++#define IS_ABORT_NESTED(s)		         _TEXASR_NESTING_OVERFLOW(s)
++#define IS_ABORT_EXPLICIT(s)	          0
++#define IS_ABORT_NON_TX_CONFLICT(s)	    _TEXASR_NON_TRANSACTIONAL_CONFLICT(s)
++#define IS_ABORT_TLB_CONFLICT(s)	      _TEXASR_TRANSLATION_INVALIDATION_CONFLICT(s)
++#define IS_ABORT_IMPL_SPECIFIC(s)	      _TEXASR_IMPLEMENTAION_SPECIFIC(s)
++#define IS_ABORT_FETCH_CONFLICT(s)	    _TEXASR_INSTRUCTION_FETCH_CONFLICT(s)
++#define IS_ABORT_PERSISTENT(s)		      _TEXASR_FAILURE_PERSISTENT(s)
++#define IS_ABORT_SUSPENDED_CONFLICT(s)	_TEXASR_SELF_INDUCED_CONFLICT(s)
++
++#endif
+\ No newline at end of file
+diff -ruN -x build ga/include/Galois/Runtime/thread.h gb/include/Galois/Runtime/thread.h
+--- ga/include/Galois/Runtime/thread.h	1970-01-01 09:00:00.000000000 +0900
++++ gb/include/Galois/Runtime/thread.h	2025-01-14 12:41:08.000000000 +0900
+@@ -0,0 +1,263 @@
++/* =============================================================================
++ *
++ * thread.h
++ *
++ * =============================================================================
++ *
++ * Copyright (C) Stanford University, 2006.  All Rights Reserved.
++ * Author: Chi Cao Minh
++ *
++ * =============================================================================
++ *
++ * For the license of bayes/sort.h and bayes/sort.c, please see the header
++ * of the files.
++ * 
++ * ------------------------------------------------------------------------
++ * 
++ * For the license of kmeans, please see kmeans/LICENSE.kmeans
++ * 
++ * ------------------------------------------------------------------------
++ * 
++ * For the license of ssca2, please see ssca2/COPYRIGHT
++ * 
++ * ------------------------------------------------------------------------
++ * 
++ * For the license of lib/mt19937ar.c and lib/mt19937ar.h, please see the
++ * header of the files.
++ * 
++ * ------------------------------------------------------------------------
++ * 
++ * For the license of lib/rbtree.h and lib/rbtree.c, please see
++ * lib/LEGALNOTICE.rbtree and lib/LICENSE.rbtree
++ * 
++ * ------------------------------------------------------------------------
++ * 
++ * Unless otherwise noted, the following license applies to STAMP files:
++ * 
++ * Copyright (c) 2007, Stanford University
++ * All rights reserved.
++ * 
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are
++ * met:
++ * 
++ *     * Redistributions of source code must retain the above copyright
++ *       notice, this list of conditions and the following disclaimer.
++ * 
++ *     * Redistributions in binary form must reproduce the above copyright
++ *       notice, this list of conditions and the following disclaimer in
++ *       the documentation and/or other materials provided with the
++ *       distribution.
++ * 
++ *     * Neither the name of Stanford University nor the names of its
++ *       contributors may be used to endorse or promote products derived
++ *       from this software without specific prior written permission.
++ * 
++ * THIS SOFTWARE IS PROVIDED BY STANFORD UNIVERSITY ``AS IS'' AND ANY
++ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL STANFORD UNIVERSITY BE LIABLE
++ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ * =============================================================================
++ */
++/* Copyright (c) IBM Corp. 2014. */
++
++
++#ifndef THREAD_H
++#define THREAD_H 1
++
++
++#include <pthread.h>
++#include <stdlib.h>
++#include <stdint.h>
++#include "types.h"
++#ifdef OTM
++#include "omp.h"
++#endif
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++
++#define THREAD_T                            pthread_t
++#define THREAD_ATTR_T                       pthread_attr_t
++
++#define THREAD_ATTR_INIT(attr)              pthread_attr_init(&attr)
++#define THREAD_JOIN(tid)                    pthread_join(tid, (void**)NULL)
++#define THREAD_CREATE(tid, attr, fn, arg)   pthread_create(&(tid), \
++                                                           &(attr), \
++                                                           (void* (*)(void*))(fn), \
++                                                           (void*)(arg))
++
++#define THREAD_KEY_T                      pthread_key_t
++#define THREAD_KEY_INIT(key)              pthread_key_create(&key, NULL)
++#define THREAD_KEY_SET(key, val)          pthread_setspecific(key, (void*)(val))
++#define THREAD_KEY_GET(key)               pthread_getspecific(key)
++
++#define THREAD_MUTEX_T                      pthread_mutex_t
++#define THREAD_MUTEX_INIT(lock)             pthread_mutex_init(&(lock), NULL)
++#define THREAD_MUTEX_LOCK(lock)             pthread_mutex_lock(&(lock))
++#define THREAD_MUTEX_UNLOCK(lock)           pthread_mutex_unlock(&(lock))
++
++#define THREAD_COND_T                       pthread_cond_t
++#define THREAD_COND_INIT(cond)              pthread_cond_init(&(cond), NULL)
++#define THREAD_COND_SIGNAL(cond)            pthread_cond_signal(&(cond))
++#define THREAD_COND_BROADCAST(cond)         pthread_cond_broadcast(&(cond))
++#define THREAD_COND_WAIT(cond, lock)        pthread_cond_wait(&(cond), &(lock))
++
++#ifdef SIMULATOR
++#  define THREAD_BARRIER_T                  pthread_barrier_t
++#  define THREAD_BARRIER_ALLOC(N)           ((THREAD_BARRIER_T*)malloc(sizeof(THREAD_BARRIER_T)))
++#  define THREAD_BARRIER_INIT(bar, N)       pthread_barrier_init(bar, 0, N)
++#  define THREAD_BARRIER(bar, tid)          pthread_barrier_wait(bar)
++#  define THREAD_BARRIER_FREE(bar)          free(bar)
++#else /* !SIMULATOR */
++#  define THREAD_BARRIER_T                  thread_barrier_t
++#  define THREAD_BARRIER_ALLOC(N)           thread_barrier_alloc(N)
++#  define THREAD_BARRIER_INIT(bar, N)       thread_barrier_init(bar)
++#  define THREAD_BARRIER(bar, tid)          thread_barrier(bar, tid)
++#  define THREAD_BARRIER_FREE(bar)          thread_barrier_free(bar)
++#endif /* !SIMULATOR */
++
++#define USE_SPIN_BARRIER
++#ifdef USE_SPIN_BARRIER
++typedef struct thread_barrier {
++  volatile int32_t reachBarrier;
++  volatile int32_t leaveBarrier;
++  volatile int reachBarrierFlag;
++  volatile int leaveBarrierFlag;
++  int32_t numThread;
++  /*volatile int debugCounter;*/
++} thread_barrier_t;
++#else
++typedef struct thread_barrier {
++    THREAD_MUTEX_T countLock;
++    THREAD_COND_T proceedCond;
++    THREAD_COND_T proceedAllCond;
++    long count;
++    long numThread;
++} thread_barrier_t;
++#endif
++
++
++/* =============================================================================
++ * thread_startup
++ * -- Create pool of secondary threads
++ * -- numThread is total number of threads (primary + secondary)
++ * =============================================================================
++ */
++void
++thread_startup (long numThread);
++
++
++/* =============================================================================
++ * thread_start
++ * -- Make primary and secondary threads execute work
++ * -- Should only be called by primary thread
++ * -- funcPtr takes one arguments: argPtr
++ * =============================================================================
++ */
++void
++thread_start (void (*funcPtr)(void*), void* argPtr);
++
++
++/* =============================================================================
++ * thread_shutdown
++ * -- Primary thread kills pool of secondary threads
++ * =============================================================================
++ */
++void
++thread_shutdown ();
++
++
++/* =============================================================================
++ * thread_barrier_alloc
++ * =============================================================================
++ */
++thread_barrier_t*
++thread_barrier_alloc (long numThreads);
++
++
++/* =============================================================================
++ * thread_barrier_free
++ * =============================================================================
++ */
++void
++thread_barrier_free (thread_barrier_t* barrierPtr);
++
++
++/* =============================================================================
++ * thread_barrier_init
++ * =============================================================================
++ */
++void
++thread_barrier_init (thread_barrier_t* barrierPtr);
++
++
++/* =============================================================================
++ * thread_barrier
++ * -- Simple logarithmic barrier
++ * =============================================================================
++ */
++void
++thread_barrier (thread_barrier_t* barrierPtr, long threadId);
++
++
++/* =============================================================================
++ * thread_getId
++ * -- Call after thread_start() to get thread ID inside parallel region
++ * =============================================================================
++ */
++long
++thread_getId();
++
++
++/* =============================================================================
++ * thread_getNumThread
++ * -- Call after thread_start() to get number of threads inside parallel region
++ * =============================================================================
++ */
++long
++thread_getNumThread();
++
++
++/* =============================================================================
++ * thread_barrier_wait
++ * -- Call after thread_start() to synchronize threads inside parallel region
++ * =============================================================================
++ */
++void
++thread_barrier_wait();
++
++#ifdef GLOBAL_LOCK
++#define USE_MUTEX
++
++#ifdef USE_MUTEX
++extern THREAD_MUTEX_T global_lock;
++#else
++extern volatile int global_lock;
++#endif
++#endif
++
++#ifdef __cplusplus
++}
++#endif
++
++
++#endif /* THREAD_H */
++
++
++/* =============================================================================
++ *
++ * End of thread.h
++ *
++ * =============================================================================
++ */
+diff -ruN -x build ga/include/Galois/Runtime/types.h gb/include/Galois/Runtime/types.h
+--- ga/include/Galois/Runtime/types.h	1970-01-01 09:00:00.000000000 +0900
++++ gb/include/Galois/Runtime/types.h	2025-01-14 12:41:08.000000000 +0900
+@@ -0,0 +1,119 @@
++/* =============================================================================
++ *
++ * types.h
++ * -- definitions of some types
++ *
++ * =============================================================================
++ *
++ * Copyright (C) Stanford University, 2006.  All Rights Reserved.
++ * Author: Chi Cao Minh
++ *
++ * =============================================================================
++ *
++ * For the license of bayes/sort.h and bayes/sort.c, please see the header
++ * of the files.
++ * 
++ * ------------------------------------------------------------------------
++ * 
++ * For the license of kmeans, please see kmeans/LICENSE.kmeans
++ * 
++ * ------------------------------------------------------------------------
++ * 
++ * For the license of ssca2, please see ssca2/COPYRIGHT
++ * 
++ * ------------------------------------------------------------------------
++ * 
++ * For the license of lib/mt19937ar.c and lib/mt19937ar.h, please see the
++ * header of the files.
++ * 
++ * ------------------------------------------------------------------------
++ * 
++ * For the license of lib/rbtree.h and lib/rbtree.c, please see
++ * lib/LEGALNOTICE.rbtree and lib/LICENSE.rbtree
++ * 
++ * ------------------------------------------------------------------------
++ * 
++ * Unless otherwise noted, the following license applies to STAMP files:
++ * 
++ * Copyright (c) 2007, Stanford University
++ * All rights reserved.
++ * 
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are
++ * met:
++ * 
++ *     * Redistributions of source code must retain the above copyright
++ *       notice, this list of conditions and the following disclaimer.
++ * 
++ *     * Redistributions in binary form must reproduce the above copyright
++ *       notice, this list of conditions and the following disclaimer in
++ *       the documentation and/or other materials provided with the
++ *       distribution.
++ * 
++ *     * Neither the name of Stanford University nor the names of its
++ *       contributors may be used to endorse or promote products derived
++ *       from this software without specific prior written permission.
++ * 
++ * THIS SOFTWARE IS PROVIDED BY STANFORD UNIVERSITY ``AS IS'' AND ANY
++ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL STANFORD UNIVERSITY BE LIABLE
++ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ * =============================================================================
++ */
++/* Copyright (c) IBM Corp. 2014. */
++
++
++#ifndef TYPES_H
++#define TYPES_H 1
++
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++
++#ifdef SIMULATOR
++#  undef TRUE
++#  undef FALSE
++#  undef bool
++#endif
++
++
++typedef unsigned long ulong_t;
++
++#ifdef FALSE
++#undef FALSE
++#endif
++#ifdef TRUE
++#undef TRUE
++#endif
++enum {
++    FALSE = 0,
++    TRUE  = 1
++};
++
++typedef long bool_t;
++
++
++#ifdef __cplusplus
++}
++#endif
++
++
++#endif /* TYPES_H */
++
++
++/* =============================================================================
++ *
++ * End of types.h
++ *
++ * =============================================================================
++ */
+diff -ruN -x build ga/src/CMakeLists.txt gb/src/CMakeLists.txt
+--- ga/src/CMakeLists.txt	2026-11-09 11:50:07.805785573 +0900
++++ gb/src/CMakeLists.txt	2025-01-14 12:41:15.000000000 +0900
+@@ -1,7 +1,7 @@
+ set(sources Barrier.cpp Context.cpp FileGraph.cpp FileGraphParallel.cpp
+   OCFileGraph.cpp PerThreadStorage.cpp PreAlloc.cpp Sampling.cpp Support.cpp
+   Stm.cpp
+-  Termination.cpp Threads.cpp ThreadPool_pthread.cpp Timer.cpp)
++  Termination.cpp Threads.cpp ThreadPool_pthread.cpp Timer.cpp htm_ibm.cpp htm_util.cpp)
+ set(include_dirs "${PROJECT_SOURCE_DIR}/include/")
+ if(USE_EXP)
+   file(GLOB exp_sources ../exp/src/*.cpp)
+diff -ruN -x build ga/src/ThreadPool_pthread.cpp gb/src/ThreadPool_pthread.cpp
+--- ga/src/ThreadPool_pthread.cpp	2026-11-09 11:50:07.805785573 +0900
++++ gb/src/ThreadPool_pthread.cpp	2025-01-14 12:41:16.000000000 +0900
+@@ -38,6 +38,11 @@
+ #include <semaphore.h>
+ #include <pthread.h>
+ 
++#ifdef GALOIS_USE_HTM
++// #include "Galois/Runtime/htm.h"
++#include "Galois/Runtime/htm_ibm.h"
++#endif
++
+ // Forward declare this to avoid including PerThreadStorage.
+ // We avoid this to stress that the thread Pool MUST NOT depend on PTS.
+ namespace Galois {
+@@ -145,12 +150,14 @@
+ 
+   void prefixThreadWork(unsigned tid) {
+     Galois::Runtime::Stm::threadEnter();
++    tm_thread_enter_ibm();
+     if (tid)
+       Galois::Runtime::beginThreadSampling();
+   }
+ 
+   void suffixThreadWork(unsigned tid) {
+     Galois::Runtime::Stm::threadExit();
++    tm_thread_exit_ibm();
+     if (tid)
+       Galois::Runtime::endThreadSampling();
+   }
+@@ -176,8 +183,11 @@
+     started(0), shutdown(false), workBegin(0), workEnd(0)
+   {
+     Galois::Runtime::Stm::start();
++    tm_startup_ibm();
++
+     initThread();
+ 
++
+     starts = new Semaphore[maxThreads];
+     threads = new pthread_t[maxThreads];
+ 
+@@ -201,6 +211,7 @@
+     delete [] starts;
+     delete [] threads;
+     Galois::Runtime::Stm::stop();
++    tm_shutdown_ibm();
+   }
+ 
+   virtual void run(RunCommand* begin, RunCommand* end, unsigned num) {
+diff -ruN -x build ga/src/Threads.cpp gb/src/Threads.cpp
+--- ga/src/Threads.cpp	2014-02-28 04:56:28.000000000 +0900
++++ gb/src/Threads.cpp	2025-01-14 12:41:16.000000000 +0900
+@@ -27,12 +27,16 @@
+ 
+ #include <algorithm>
+ 
++#include <math.h>
++
+ unsigned int Galois::Runtime::activeThreads = 1;
++unsigned int Galois::Runtime::serializationTreeHeight = 1;
+ 
+ unsigned int Galois::setActiveThreads(unsigned int num) {
+   num = std::min(num, Galois::Runtime::getSystemThreadPool().getMaxThreads());
+   num = std::max(num, 1U);
+   Galois::Runtime::activeThreads = num;
++  Galois::Runtime::serializationTreeHeight = log2(num);
+   return num;
+ }
+ 
+diff -ruN -x build ga/src/htm_ibm.cpp gb/src/htm_ibm.cpp
+--- ga/src/htm_ibm.cpp	1970-01-01 09:00:00.000000000 +0900
++++ gb/src/htm_ibm.cpp	2025-01-14 12:41:16.000000000 +0900
+@@ -0,0 +1,677 @@
++/* Copyright (c) IBM Corp. 2014. */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <inttypes.h>
++#include <unistd.h>
++#include "Galois/Runtime/htm_ibm.h"
++#include "Galois/Runtime/htm_util.h"
++#include "Galois/Runtime/thread.h"
++#include "Galois/Runtime/mfence.h"
++#include "Galois/Runtime/Context.h"
++#include "Galois/Runtime/ActiveThreads.h"
++// #include "tm.h"
++#ifdef __bgq__
++#include <speculation.h>
++#endif
++
++#define NUM_HTM_STATS_EVENTS 14
++#define NUM_HTM_ABORT_REASON_CODES 19
++#define NUM_HTM_TBEGIN_RETURNS 3
++#define NUM_ATOMIC_REGIONS 20
++#ifndef DETECT_DELINQUENTS
++#define DETECT_DELINQUENTS 0
++#endif
++
++enum {
++  event_tx = 0,
++  event_tx_enter,
++  event_abort,
++  event_first_abort,
++  event_global_lock_wait_before_tx_spin,
++  event_global_lock_wait_before_tx_sleep,
++  event_global_lock_wait_and_retry_spin,
++  event_global_lock_wait_and_retry_sleep,
++  event_global_lock_acquired,
++  event_persistent_abort_retry,
++  event_global_lock_persistent_abort,
++  event_transient_abort_retry,
++  event_global_lock_transient_abort,
++  event_detected_delinquent
++};
++
++typedef struct htm_stats_struct {
++  unsigned long long event_counter[NUM_HTM_STATS_EVENTS];
++#if defined(__370__)
++  unsigned long long abort_reason_code[NUM_HTM_ABORT_REASON_CODES][NUM_HTM_TBEGIN_RETURNS];
++#elif defined(__x86_64__)
++#define HTM_IA32_STAT(nam) long long unsigned int nam;
++  struct{
++#include "Galois/Runtime/htm_ia32_stat.h"
++  } abort_reason_counters;
++#undef HTM_IA32_STAT
++#elif defined(__PPC__) || defined(_ARCH_PPC)
++#define HTM_PPC_STAT(NAM) long long unsigned int NAM;
++  struct {
++#include "Galois/Runtime/htm_ppc_stat.h"
++  } abort_reason_counters;
++#undef HTM_PPC_STAT
++#else
++  char dummy;
++#endif
++} htm_stats_t;
++
++typedef struct tls_struct {
++  htm_stats_t htm_stats[NUM_ATOMIC_REGIONS];
++} tls_t;
++
++/*#define USE_MUTEX*/
++
++static union {
++  char two_cache_lines[512];
++  struct {
++    char one_cache_line[256];
++    volatile int global_lock;
++    char another_cache_line[252];
++  } a;
++} gl;
++#ifdef USE_MUTEX
++static THREAD_MUTEX_T global_lock_mutex;
++static THREAD_COND_T global_lock_cond;
++#endif
++static THREAD_KEY_T global_tls_key;
++
++static int transient_retry_max = 16;
++static int persistent_retry_max = 2;
++static int global_lock_retry_max = 16;
++static int collect_stats = 0;
++static htm_stats_t global_htm_stats_per_region[NUM_ATOMIC_REGIONS];
++static htm_stats_t global_htm_stats;
++static THREAD_MUTEX_T global_htm_stats_lock;
++
++
++/*#define ABORTED_INSN_ADDRESS_STATS*/
++#ifdef ABORTED_INSN_ADDRESS_STATS
++#define ABORTED_INSN_ADDRESS_STATS_MAP_SIZE (15 * 1024 * 1024 / 2)
++#define ABORTED_INSN_ADDRESS_STATS_START_ADDRESS 0x13b08000
++/*#define ABORTED_INSN_ADDRESS_STATS_START_ADDRESS 0x25c08000*/
++uint64_t aborted_insn_address_stats[ABORTED_INSN_ADDRESS_STATS_MAP_SIZE];
++uint64_t aborted_insn_address_reason_code;
++#endif
++
++void
++tm_startup_ibm()
++{
++  const char *env_transient_retry_max;
++  const char *env_persistent_retry_max;
++  const char *env_global_lock_retry_max;
++  const char *env_collect_stats;
++#ifdef ABORTED_INSN_ADDRESS_STATS
++  const char *env_aborted_insn_address_reason_code;
++#endif
++
++  gl.a.global_lock = 0;
++#ifdef USE_MUTEX
++  THREAD_MUTEX_INIT(global_lock_mutex);
++  THREAD_COND_INIT(global_lock_cond);
++#endif
++  THREAD_KEY_INIT(global_tls_key);
++
++  env_transient_retry_max = getenv("HTM_TRETRY");
++  if (env_transient_retry_max) {
++#ifdef __bgq__
++    fprintf(stderr, "<HTM_TRETRY has no meaning on Blue Gene/Q>");
++#else
++    transient_retry_max = atoi(env_transient_retry_max);
++    fprintf(stderr, "<HTM_TRETRY=%d>\n", transient_retry_max);
++#endif
++  }
++
++  env_persistent_retry_max = getenv("HTM_PRETRY");
++  if (env_persistent_retry_max) {
++#ifdef __bgq__
++    fprintf(stderr, "<HTM_PRETRY has no meaning on Blue Gene/Q>");
++#else
++    persistent_retry_max = atoi(env_persistent_retry_max);
++    fprintf(stderr, "<HTM_PRETRY=%d>\n", persistent_retry_max);
++#endif
++  }
++
++  env_global_lock_retry_max = getenv("HTM_GRETRY");
++  if (env_global_lock_retry_max) {
++#ifdef __bgq__
++    fprintf(stderr, "<HTM_GRETRY has no meaning on Blue Gene/Q>");
++#else
++    global_lock_retry_max = atoi(env_global_lock_retry_max);
++    fprintf(stderr, "<HTM_GRETRY=%d>\n", global_lock_retry_max);
++#endif
++  }
++
++  env_collect_stats = getenv("HTM_STATS");
++  if (DETECT_DELINQUENTS || env_collect_stats) {
++    collect_stats = 1;
++  }
++
++#ifdef ABORTED_INSN_ADDRESS_STATS
++  env_aborted_insn_address_reason_code = getenv("HTM_AIACODE");
++  if (env_aborted_insn_address_reason_code) {
++    aborted_insn_address_reason_code = (uint64_t)atoi(env_aborted_insn_address_reason_code);
++  }
++#endif
++
++#ifndef __bgq__
++  if (collect_stats) {
++    memset(&global_htm_stats_per_region, 0, sizeof(global_htm_stats_per_region));
++    memset(&global_htm_stats, 0, sizeof(global_htm_stats));
++    THREAD_MUTEX_INIT(global_htm_stats_lock);
++  }
++#endif
++}
++
++static void
++print_stats(htm_stats_t *stats)
++{
++#if defined(__bgq__)
++  TmReport_t bgq_htm_stats;
++
++  tm_get_all_stats(&bgq_htm_stats);
++  printf("#HTM_STATS %15lu totalTransactions\n", bgq_htm_stats.totalTransactions);
++  printf("#HTM_STATS %15lu totalRollbacks\n", bgq_htm_stats.totalRollbacks);
++  printf("#HTM_STATS %15lu totalSerializedJMV\n", bgq_htm_stats.totalSerializedJMV);
++  printf("#HTM_STATS %15lu totalSerializedMAXRB\n", bgq_htm_stats.totalSerializedMAXRB);
++  printf("#HTM_STATS %15lu totalSerializedOTHER\n", bgq_htm_stats.totalSerializedOTHER);
++#else /* ! __bgq__ */
++#if defined(__370__)
++  int i;
++  const char *reason_string[] = {
++    "TDB_not_set",
++    "Restart_interruption",
++    "External_interruption",
++    NULL,
++    "Program_interruption",
++    "Machine-check_interruption",
++    "I/O_interruption",
++    "Fetch_overflow",
++    "Store_overflow",
++    "Fetch_conflict",
++    "Store_conflict",
++    "Restricted_instruction",
++    "Program-interruption_condition",
++    "Nesting_depth_exceeded",
++    "Cache_fetch-related",
++    "Cache_store-related",
++    "Cache_other",
++    "Undetermined_condition",
++    "TABORT_instruction"
++  };
++#endif
++
++  fprintf(stderr, "#HTM_STATS %15llu           tx_enter\n", stats->event_counter[event_tx_enter]);
++  fprintf(stderr, "#HTM_STATS %15llu           tx\n", stats->event_counter[event_tx]);
++  fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  global_lock_wait_before_tx_spin\n", stats->event_counter[event_global_lock_wait_before_tx_spin], 100 * stats->event_counter[event_global_lock_wait_before_tx_spin] / (double)stats->event_counter[event_tx_enter]);
++  fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  global_lock_wait_before_tx_sleep\n", stats->event_counter[event_global_lock_wait_before_tx_sleep], 100 * stats->event_counter[event_global_lock_wait_before_tx_sleep] / (double)stats->event_counter[event_tx_enter]);
++  fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  abort\n", stats->event_counter[event_abort], 100 * stats->event_counter[event_abort] / (double)stats->event_counter[event_tx]);
++  fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  first_abort\n", stats->event_counter[event_first_abort], 100 * stats->event_counter[event_first_abort] / (double)stats->event_counter[event_tx_enter]);
++  fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  global_lock_wait_and_retry_spin\n", stats->event_counter[event_global_lock_wait_and_retry_spin], 100 * stats->event_counter[event_global_lock_wait_and_retry_spin] / (double)stats->event_counter[event_abort]);
++  fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  global_lock_wait_and_retry_sleep\n", stats->event_counter[event_global_lock_wait_and_retry_sleep], 100 * stats->event_counter[event_global_lock_wait_and_retry_sleep] / (double)stats->event_counter[event_abort]);
++  fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  global_lock_acquired\n", stats->event_counter[event_global_lock_acquired], 100 * stats->event_counter[event_global_lock_acquired] / (double)stats->event_counter[event_abort]);
++  fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  persistent_abort_retry\n", stats->event_counter[event_persistent_abort_retry], 100 * stats->event_counter[event_persistent_abort_retry] / (double)stats->event_counter[event_abort]);
++  fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  global_lock_persistent_abort\n", stats->event_counter[event_global_lock_persistent_abort], 100 * stats->event_counter[event_global_lock_persistent_abort] / (double)stats->event_counter[event_abort]);
++  fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  transient_abort_retry\n", stats->event_counter[event_transient_abort_retry], 100 * stats->event_counter[event_transient_abort_retry] / (double)stats->event_counter[event_abort]);
++  fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  global_lock_transient_abort\n", stats->event_counter[event_global_lock_transient_abort], 100 * stats->event_counter[event_global_lock_transient_abort] / (double)stats->event_counter[event_abort]);
++  fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  detected_delinquent\n", stats->event_counter[event_detected_delinquent], 100 * stats->event_counter[event_detected_delinquent] / (double)stats->event_counter[event_tx_enter]);
++
++#if defined(__370__)
++  for (i = 0; i < NUM_HTM_ABORT_REASON_CODES; i++) {
++    if (reason_string[i]) {
++      unsigned long long total = stats->abort_reason_code[i][0] + stats->abort_reason_code[i][1] + stats->abort_reason_code[i][2];
++      fprintf(stderr, "#HTM_STATS %15llu %s\n", total, reason_string[i]);
++    }
++  }
++#elif defined(__x86_64__)
++#define HTM_IA32_STAT(nam) fprintf(stderr, "#HTM_STATS %15llu " #nam "\n", stats->abort_reason_counters.nam );
++#include "Galois/Runtime/htm_ia32_stat.h"
++#undef HTM_IA32_STAT
++#elif defined(__PPC__) || defined(_ARCH_PPC)
++#define HTM_PPC_STAT(nam) fprintf(stderr, "#HTM_STATS %15llu " #nam "\n", stats->abort_reason_counters.nam );
++#include "Galois/Runtime/htm_ppc_stat.h"
++#undef HTM_PPC_STAT
++#endif
++#endif /* ! __bgq__ */
++}
++
++void
++tm_shutdown_ibm()
++{
++  if (collect_stats) {
++#ifndef __bgq__
++    int i;
++    int region;
++
++    for (region = 0; region < NUM_ATOMIC_REGIONS; region++) {
++      for (i = 0; i < NUM_HTM_STATS_EVENTS; i++) {
++	global_htm_stats.event_counter[i] += global_htm_stats_per_region[region].event_counter[i];
++      }
++#if defined(__370__)
++      for (i = 0; i < NUM_HTM_ABORT_REASON_CODES; i++) {
++	int j;
++	for (j = 0; j < NUM_HTM_TBEGIN_RETURNS; j++) {
++	  global_htm_stats.abort_reason_code[i][j] += global_htm_stats_per_region[region].abort_reason_code[i][j];
++	}
++      }
++#elif defined(__x86_64__)
++#define HTM_IA32_STAT(nam) global_htm_stats.abort_reason_counters.nam += global_htm_stats_per_region[region].abort_reason_counters.nam;
++#include "Galois/Runtime/htm_ia32_stat.h"
++#undef HTM_IA32_STAT
++#elif defined(__PPC__) || defined(_ARCH_PPC)
++#define HTM_PPC_STAT(nam) global_htm_stats.abort_reason_counters.nam += global_htm_stats_per_region[region].abort_reason_counters.nam;
++#include "Galois/Runtime/htm_ppc_stat.h"
++#undef HTM_PPC_STAT
++#endif
++    }
++#endif /* ! __bgq__ */
++
++    print_stats(&global_htm_stats);
++    if (getenv("HTM_STATS_PER_REGION")) {
++#ifdef __bgq__
++      fprintf(stderr, "<HTM_STATS_PER_REGION is not supported on Blue Gene/Q>\n");
++#else
++      for (region = 0; region < NUM_ATOMIC_REGIONS; region++) {
++	if (global_htm_stats_per_region[region].event_counter[event_tx] != 0) {
++	  fprintf(stderr, "--- region %d ------------------------------\n", region);
++	  print_stats(&global_htm_stats_per_region[region]);
++	}
++      }
++#endif
++    }
++  }
++
++#ifdef ABORTED_INSN_ADDRESS_STATS
++  {
++    int insn_addr;
++    for (insn_addr = 0; insn_addr < ABORTED_INSN_ADDRESS_STATS_MAP_SIZE; insn_addr++) {
++      if (aborted_insn_address_stats[insn_addr] != 0) {
++	fprintf(stderr, "ABORTED_INSN_ADDRESS %" PRIx64 " %x %" PRIu64 "\n", (uint64_t)(ABORTED_INSN_ADDRESS_STATS_START_ADDRESS + insn_addr * 2), insn_addr * 2, aborted_insn_address_stats[insn_addr]);
++      }
++    }
++  }
++#endif
++
++  if (getenv("LOOP_AT_END")) {
++    for ( ; ; ) {
++      sleep(3600);
++    }
++  }
++}
++
++void
++tm_thread_enter_ibm()
++{
++#ifndef __bgq__
++  tls_t *tls;
++
++  tls = (tls_t *)malloc(sizeof(tls_t));
++  if (tls == NULL) {
++    fprintf(stderr, "malloc error\n");
++    exit(1);
++  }
++  memset(tls, 0, sizeof(tls_t));
++
++  THREAD_KEY_SET(global_tls_key, tls);
++#endif /* ! __bgq__ */
++}
++
++void
++tm_thread_exit_ibm()
++{
++#ifndef __bgq__
++  if (collect_stats) {
++    tls_t *tls;
++    int i;
++    int region;
++
++    tls = (tls_t *)THREAD_KEY_GET(global_tls_key);
++
++    THREAD_MUTEX_LOCK(global_htm_stats_lock);
++    for (region = 0; region < NUM_ATOMIC_REGIONS; region++) {
++      for (i = 0; i < NUM_HTM_STATS_EVENTS; i++) {
++	global_htm_stats_per_region[region].event_counter[i] += tls->htm_stats[region].event_counter[i];
++      }
++#if defined(__370__)
++      for (i = 0; i < NUM_HTM_ABORT_REASON_CODES; i++) {
++	int j;
++	for (j = 0; j < NUM_HTM_TBEGIN_RETURNS; j++) {
++	  global_htm_stats_per_region[region].abort_reason_code[i][j] += tls->htm_stats[region].abort_reason_code[i][j];
++	}
++      }
++#elif defined(__x86_64__)
++#define HTM_IA32_STAT(nam) global_htm_stats_per_region[region].abort_reason_counters.nam += tls->htm_stats[region].abort_reason_counters.nam;
++#include "Galois/Runtime/htm_ia32_stat.h"
++#undef HTM_IA32_STAT
++#elif defined(__PPC__) || defined(_ARCH_PPC)
++#define HTM_PPC_STAT(nam) global_htm_stats_per_region[region].abort_reason_counters.nam += tls->htm_stats[region].abort_reason_counters.nam;
++#include "Galois/Runtime/htm_ppc_stat.h"
++#undef HTM_PPC_STAT
++#endif
++    }
++    THREAD_MUTEX_UNLOCK(global_htm_stats_lock);
++  }
++#endif /* ! __bgq__ */
++}
++
++static int
++fall_back_global_lock(int acquire)
++{
++#ifdef USE_MUTEX
++  const int spin_max = 2000000000;
++  int spin_count = spin_max;
++  while (gl.a.global_lock && --spin_count > 0)
++    ;
++  if (! acquire && ! gl.a.global_lock) {
++    return 0;
++  }
++
++  THREAD_MUTEX_LOCK(global_lock_mutex);
++  while (gl.a.global_lock) {
++    THREAD_COND_WAIT(global_lock_cond, global_lock_mutex);
++  }
++  gl.a.global_lock = 1;
++  THREAD_MUTEX_UNLOCK(global_lock_mutex);
++
++  return 1;
++#else /* !USE_MUTEX */
++#if defined(__370__)
++  cs_t local_value = 0;
++  cs_t new_value = 1;
++#endif
++
++  while (gl.a.global_lock)
++    ;
++  if (! acquire)
++    return 0;
++
++#if defined(__370__)
++  while (cs(&local_value, (cs_t *)&gl.a.global_lock, new_value)) {
++    while (local_value = gl.a.global_lock)
++      ;
++  }
++#elif defined(__IBMC__)
++  memory_fence();
++  while(__check_lock_mp(&gl.a.global_lock, 0, 1));
++  memory_fence();
++#elif defined(__GNUC__)
++  while (__sync_val_compare_and_swap(&gl.a.global_lock, 0, 1)) {
++    while (gl.a.global_lock)
++      ;
++  }
++#else
++#error
++#endif
++
++  return 1;
++#endif /* USE_MUTEX */
++}
++
++#define INCREMENT_STAT(field)				\
++  do {							\
++    if (collect_stats) {				\
++      tls->htm_stats[region_id].event_counter[event_ ## field]++;	\
++    }							\
++  } while (0)
++
++static int isAbortPersistent(int tbegin_result,TransactionDiagnosticInfo *diag) {
++#if defined(__370__)
++  uint64_t reason=diag->transactionAbortCode;
++  return (tbegin_result != 4 &&
++	  (diag->format != 1 || reason == 7 || reason == 8 || (11 <= reason && reason <= 13)));
++#elif defined(__x86_64__)
++  return ( (tbegin_result != 4) && !(diag->transactionAbortCode&XABORT_RETRY));
++#elif defined(__PPC__) || defined(_ARCH_PPC)
++  return (tbegin_result != 4) && (diag->transactionAbortCode&0x0100000000000000ULL);
++#else
++  return 0;
++#endif
++}
++
++static int isTransactionDelinquent(htm_stats_t* stats) {
++  static const long long min_tx_before_detection=1000;
++  static const long long delinquent_abort_threshold=80;
++  long long abort_ratio;
++  int res=0;
++  if(min_tx_before_detection<(stats->event_counter[event_tx])) {
++    abort_ratio=(100LL* stats->event_counter[event_abort]) / stats->event_counter[event_tx];
++    if(abort_ratio>delinquent_abort_threshold) {
++      res=1;
++    }
++  }
++  return res;
++}
++
++/*#define ABORT_CC_AND_RETRY_STATS*/
++
++void
++tbegin_ibm(int region_id, int* ar, int tAbortCtr, int pAbortCtr, int lAbortCtr)
++{
++  int tbegin_result;
++  TransactionDiagnosticInfo diag;
++  int transient_retry_count;
++  int persistent_retry_count;
++  int global_lock_retry_count;
++  tls_t *tls = NULL;
++  int first_retry;
++#if defined(__370__)
++  uint64_t saved_fprs[8];  /* FPR8 - FPR15 */
++#endif
++#ifdef ABORT_CC_AND_RETRY_STATS
++  uint64_t saved_reason = 0; uint8_t saved_LSUAbortCode = 0; int saved_tbegin_result = 0;
++#endif
++
++  if (collect_stats) {
++    tls = (tls_t *)THREAD_KEY_GET(global_tls_key);
++  }
++
++  INCREMENT_STAT(tx_enter);
++
++  /* Do not use HTM for delinquent transactions */
++  if(DETECT_DELINQUENTS && isTransactionDelinquent(&(tls->htm_stats[region_id]))) {
++    fall_back_global_lock(1);
++    INCREMENT_STAT(detected_delinquent);
++    return;
++  }
++
++  if (gl.a.global_lock) {
++    if (fall_back_global_lock(0)) {
++      INCREMENT_STAT(global_lock_wait_before_tx_sleep);
++      return;
++    }
++    INCREMENT_STAT(global_lock_wait_before_tx_spin);
++  }
++
++  transient_retry_count = (Galois::Runtime::serializationTreeHeight * 7) - tAbortCtr;
++  persistent_retry_count = persistent_retry_max - pAbortCtr;
++  global_lock_retry_count = global_lock_retry_max - lAbortCtr;
++  first_retry = 1;
++#if defined(__370__)
++  save_preserved_fpr(saved_fprs);
++#endif
++ tx_retry:
++  INCREMENT_STAT(tx);
++  tbegin_result = tbegin(&diag);
++  if (tbegin_result == 0) {
++    /* Transaction */
++    if (gl.a.global_lock) {
++      tend();
++      tbegin_result = 4;
++    }
++#ifdef HTM_CONSERVE_RWBUF
++    else {
++      suspend_tx();
++    }
++#endif
++  }
++  if (tbegin_result != 0) {
++    /* Abort */
++    uint64_t reason = diag.transactionAbortCode;
++    /*int saved_first_retry;*/
++
++    if (tbegin_result != 4) {
++#if defined(__370__)
++      restore_preserved_fpr(saved_fprs);
++#endif
++    }
++
++#ifdef ABORT_CC_AND_RETRY_STATS
++    if (global_lock_retry_count == global_lock_retry_max
++	&& reason == saved_reason && diag.LSUAbortCode == saved_LSUAbortCode && tbegin_result == saved_tbegin_result) {
++      printf("AbortCcAndRetryStats r %d %llu %u %d\n", transient_retry_count, saved_reason, saved_LSUAbortCode, saved_tbegin_result);
++    }
++#endif
++
++    INCREMENT_STAT(abort);
++    /*saved_first_retry = first_retry;*/
++    if (first_retry) {
++      first_retry = 0;
++      INCREMENT_STAT(first_abort);
++    }
++
++    if (gl.a.global_lock) {
++      if (--global_lock_retry_count > 0) {
++        if (fall_back_global_lock(0)) {
++          INCREMENT_STAT(global_lock_wait_and_retry_sleep);
++          return;
++        }
++        INCREMENT_STAT(global_lock_wait_and_retry_spin);
++        *ar = 3;
++        Galois::Runtime::forceAbort();
++      }
++      INCREMENT_STAT(global_lock_acquired);
++      fall_back_global_lock(1);
++    } else {
++      if (collect_stats /*&& saved_first_retry*/) {
++#if defined(__370__)
++        if (tbegin_result == 4) {
++          tls->htm_stats[region_id].abort_reason_code[18][1]++;
++        } else if (diag.format != 1) {
++          tls->htm_stats[region_id].abort_reason_code[0][tbegin_result - 1]++;
++        } else if (reason <= 16) {
++          tls->htm_stats[region_id].abort_reason_code[reason][tbegin_result - 1]++;
++        } else if (reason == 255) {
++          tls->htm_stats[region_id].abort_reason_code[17][tbegin_result - 1]++;
++        } else {
++          tls->htm_stats[region_id].abort_reason_code[18][tbegin_result - 1]++;
++        }
++#elif defined(__x86_64__)
++        #define TLSCTR tls->htm_stats[region_id].abort_reason_counters
++        if(tbegin_result==4) {
++          TLSCTR.GLOBAL_LOCK_ACQUIRED ++;
++        } else {
++          TLSCTR.XABORT                    += (reason&XABORT_EXPLICIT)?1L:0L;
++          TLSCTR.TRANSIENT                 += (reason&XABORT_RETRY)?1L:0L;
++          TLSCTR.MEMADDR_CONFLICT          += (reason&XABORT_CONFLICT)?1L:0L;
++          TLSCTR.BUFFER_OVERFLOW           += (reason&XABORT_CAPACITY)?1L:0L;
++          TLSCTR.HIT_DEBUG_BREAKPOINT      += (reason&XABORT_DEBUG)?1L:0L;
++          TLSCTR.DURING_NESTED_TRANSACTION += (reason&XABORT_NESTED)?1L:0L;
++        }
++#elif defined(__PPC__) || defined(_ARCH_PPC)
++        #define TLSCTR tls->htm_stats[region_id].abort_reason_counters
++        #define PPC_BFIELD(x) ((0x1ULL)<<(63-x))
++        if(tbegin_result==4) {
++          TLSCTR.Global_Lock_Acquired ++;
++        } else {
++          TLSCTR.Failure_Persistent                += (reason&PPC_BFIELD( 7))?1:0;
++          TLSCTR.Disallowed                        += (reason&PPC_BFIELD( 8))?1:0;
++          TLSCTR.Nesting_Overflow                  += (reason&PPC_BFIELD( 9))?1:0;
++          TLSCTR.Footprint_Overflow                += (reason&PPC_BFIELD(10))?1:0;
++          TLSCTR.Self_Induced_Conflict             += (reason&PPC_BFIELD(11))?1:0;
++          TLSCTR.Non_Transactional_Conflict        += (reason&PPC_BFIELD(12))?1:0;
++          TLSCTR.Transaction_Conflict              += (reason&PPC_BFIELD(13))?1:0;
++          TLSCTR.Translation_Invalidation_Conflict += (reason&PPC_BFIELD(14))?1:0;
++          TLSCTR.Implementation_Specific           += (reason&PPC_BFIELD(15))?1:0;
++          TLSCTR.Instruction_Fetch_Conflict        += (reason&PPC_BFIELD(16))?1:0;
++        }
++#endif
++      }
++
++#ifdef ABORTED_INSN_ADDRESS_STATS
++      if (reason == aborted_insn_address_reason_code) {
++        int idx;
++
++        if (diag.abortedTransactionInstructionAddress < ABORTED_INSN_ADDRESS_STATS_START_ADDRESS) {
++          idx = 0;
++        } else {
++          idx = (diag.abortedTransactionInstructionAddress - ABORTED_INSN_ADDRESS_STATS_START_ADDRESS) / 2;
++          if (idx >= ABORTED_INSN_ADDRESS_STATS_MAP_SIZE)
++            idx = ABORTED_INSN_ADDRESS_STATS_MAP_SIZE - 1;
++        }
++        aborted_insn_address_stats[idx]++;
++      }
++#endif
++
++#ifdef ABORT_CC_AND_RETRY_STATS
++      if (global_lock_retry_count == global_lock_retry_max
++          && (transient_retry_count == transient_retry_max ||
++	        reason == saved_reason && diag.LSUAbortCode == saved_LSUAbortCode && tbegin_result == saved_tbegin_result)) {
++	      printf("AbortCcAndRetryStats f %d %llu %u %d\n", transient_retry_count, reason, diag.LSUAbortCode, tbegin_result);
++	      saved_reason = reason; saved_LSUAbortCode = diag.LSUAbortCode; saved_tbegin_result = tbegin_result;
++      } else {
++        saved_reason = 0; saved_LSUAbortCode = 0; saved_tbegin_result = 0;
++      }
++#else /* ABORT_CC_AND_RETRY_STATS */
++      if (isAbortPersistent(tbegin_result,&diag)) {
++        /* Persistent abort */
++        if (--persistent_retry_count > 0) {
++          INCREMENT_STAT(persistent_abort_retry);
++          *ar = 2;
++          Galois::Runtime::forceAbort();
++        }
++        INCREMENT_STAT(global_lock_persistent_abort);
++        fall_back_global_lock(1);
++      } else
++#endif /* ! ABORT_CC_AND_RETRY_STATS */
++      {
++        /* Transient abort */
++        if (--transient_retry_count > 0) {
++          INCREMENT_STAT(transient_abort_retry);
++          // goto tx_retry;
++          *ar = 1;
++          Galois::Runtime::forceAbort();
++        }
++        INCREMENT_STAT(global_lock_transient_abort);
++        fall_back_global_lock(1);
++      }
++    }
++  }
++}
++
++
++void
++tend_ibm()
++{
++#ifdef HTM_CONSERVE_RWBUF
++  resume_tx();
++#endif
++  if (gl.a.global_lock) {
++#ifdef USE_MUTEX
++    THREAD_MUTEX_LOCK(global_lock_mutex);
++    gl.a.global_lock = 0;
++    THREAD_COND_SIGNAL(global_lock_cond);
++    THREAD_MUTEX_UNLOCK(global_lock_mutex);
++#else
++    memory_fence();
++#if !defined(__370__) && defined(__IBMC__)
++    __clear_lock_mp(&gl.a.global_lock,0);
++#else
++    gl.a.global_lock = 0;
++#endif /* __IBMC__ */
++#endif
++    /*memory_fence();*/
++  } else {
++    tend();
++  }
++}
++
++void
++tabort_ibm()
++{
++  tabort(300);
++}
+diff -ruN -x build ga/src/htm_util.cpp gb/src/htm_util.cpp
+--- ga/src/htm_util.cpp	1970-01-01 09:00:00.000000000 +0900
++++ gb/src/htm_util.cpp	2025-01-14 12:41:16.000000000 +0900
+@@ -0,0 +1,239 @@
++/* Copyright (c) IBM Corp. 2014. */
++#include <stdio.h>
++#include <stdint.h>
++#include <assert.h>
++#include "Galois/Runtime/htm_util.h"
++
++#if defined(__370__)
++
++static int tbegin_impl(void *diag);
++#if 1
++/* lghi gpr3,0; tbegin 0(gpr1),FF00; brc 0x8,$+16; lghi gpr3,2; brc 0x6,$+8; lghi gpr3,3 */
++#pragma mc_func tbegin_impl {"A7390000" "E5601000FF00" "A7840008" "A7390002" "A7640004" "A7390003"}
++#else
++/* lghi gpr3,0; tbegin 0(gpr1),FF00; brc 0x8,$+24; lghi gpr3,1; brc 0x4,$+16; lghi gpr3,2; brc 0x2,$+8; lghi gpr3,3 */
++#pragma mc_func tbegin_impl {"A7390000" "E5601000FF00" "A784000C" "A7390001" "A7440008" "A7390002" "A7240004" "A7390003"}
++#endif
++
++static int tbegin_fp_impl(void *diag);
++#if 1
++#pragma mc_func tbegin_fp_impl {"A7390000" "E5601000FF04" "A7840008" "A7390002" "A7640004" "A7390003"}
++#else
++#pragma mc_func tbegin_fp_impl {"A7390000" "E5601000FF04" "A784000C" "A7390001" "A7440008" "A7390002" "A7240004" "A7390003"}
++#endif
++
++static void tend_impl(void *diag);
++#pragma mc_func tend_impl {"B2F81000"}  /* tend 0(gpr1) */
++
++static void ctend_impl(volatile int64_t *addr);
++#pragma mc_func ctend_impl {"E30010000028"}  /* ctend 0(gpr1) */
++
++static void tabort_impl(int code);
++#pragma mc_func tabort_impl {"B2FC1000"}  /* tabort 0(gpr1) */
++
++static void tabort_no_abend_in_no_tx_impl(int code);
++/* tbegin 0(gpr0),FF00; brc 0x7,$+8; tabort 0(gpr1) */
++#pragma mc_func tabort_no_abend_in_no_tx_impl {"E5600000FF00" "A7740004" "B2FC1000"}
++
++static void non_tx_store_impl(int64_t *addr, int64_t data);
++#pragma mc_func non_tx_store_impl { "E32010000025" }  /* ntstg gpr2,0(gpr1) */
++
++static uint64_t
++get_transaction_nesting_depth_impl();
++#pragma mc_func get_transaction_nesting_depth_impl { "B2EC0030" }  /* ETNDG gpr3 */
++
++/* std fpr8,0(gpr1); ...; std fpr15,56(gpr1) */
++static void save_preserved_fpr_impl(uint64_t *addr);
++#pragma mc_func save_preserved_fpr_impl {"60801000" "60901008" "60A01010" "60B01018" "60C01020" "60D01028" "60E01030" "60F01038"}
++
++/* ld fpr8,0(gpr1); ...; ld fpr15,56(gpr1) */
++static void restore_preserved_fpr_impl(uint64_t *addr);
++#pragma mc_func restore_preserved_fpr_impl {"68801000" "68901008" "68A01010" "68B01018" "68C01020" "68D01028" "68E01030" "68F01038"}
++
++int
++tbegin(TransactionDiagnosticInfo *diag)
++{
++  /*return tbegin_impl(diag);*/
++  return tbegin_fp_impl(diag);
++}
++
++#if defined(__370__) && __COMPILER_VER__ >= 0x410d0000
++/* Macro-expanded to intrinsic */
++#else
++void
++tend(void)
++{
++  TransactionDiagnosticInfo *diag = NULL;
++  tend_impl(diag);
++}
++#endif
++
++void
++ctend(volatile int64_t *addr)
++{
++  ctend_impl(addr);
++}
++
++void
++tabort(uint64_t code)
++{
++  tabort_impl(code);
++}
++
++void
++tabort_no_abend_in_no_tx(uint64_t code)
++{
++  tabort_no_abend_in_no_tx_impl(code);
++}
++
++#if defined(__370__) && __COMPILER_VER__ >= 0x410d0000
++/* Macro-expanded to intrinsic */
++#else
++void
++non_tx_store(int64_t *addr, int64_t data)
++{
++  /* addr must be 8-byte aligned */
++  non_tx_store_impl(addr, data);
++}
++#endif
++
++#if defined(__370__) && __COMPILER_VER__ >= 0x410d0000
++/* Macro-expanded to intrinsic */
++#else
++int
++get_transaction_nesting_depth(void)
++{
++  uint64_t ret;
++
++  ret = get_transaction_nesting_depth_impl();
++  return ret & 0xFFFF;
++}
++#endif
++
++void
++save_preserved_fpr(uint64_t *addr)
++{
++  save_preserved_fpr_impl(addr);
++}
++
++void
++restore_preserved_fpr(uint64_t *addr)
++{
++  restore_preserved_fpr_impl(addr);
++}
++
++#elif defined(__x86_64__)  /* __370__ */
++
++/* Everything is in htm_util.h */
++
++#elif defined(__PPC__) || defined(_ARCH_PPC)
++
++/* Everything is in htm_util.h */
++
++#else /* __370__ , __x86_64, __PPC__ */
++
++#error
++
++#endif  /* __370__ -> __x86_64 -> __PPC__ */
++
++void
++countHTMFailures(TransactionDiagnosticInfo *diag, uint64_t *counters)
++{
++#if defined(__370__)
++  uint64_t abortCode = diag->transactionAbortCode;
++  if (diag->format != 1) {
++    counters[0]++;
++  } else if (abortCode <= 2) {
++    counters[abortCode]++;
++    /* No such abort code as 3  */
++  } else if (abortCode <= 17) {
++    counters[abortCode - 1]++;
++  } else if (abortCode == 255) {
++    counters[17]++;
++  } else {
++    counters[18]++;
++  }
++#elif defined(__x86_64__)
++  uint64_t abortCode = diag->transactionAbortCode;
++  counters[0] += (abortCode & XABORT_EXPLICIT) ? 1 : 0;
++  counters[1] += (abortCode & XABORT_RETRY) ? 1 : 0;
++  counters[2] += (abortCode & XABORT_CONFLICT) ? 1 : 0;
++  counters[3] += (abortCode & XABORT_CAPACITY) ? 1 : 0;
++  counters[4] += (abortCode & XABORT_DEBUG) ? 1 : 0;
++  counters[5] += (abortCode & XABORT_NESTED) ? 1 : 0;
++  counters[6] += (abortCode & (XABORT_EXPLICIT | XABORT_RETRY | XABORT_CONFLICT | XABORT_CONFLICT | XABORT_DEBUG | XABORT_NESTED)) ? 0 : 1;  /* Other */
++#elif defined(__PPC__) || defined(_ARCH_PPC)
++  uint64_t texasr = diag->transactionAbortCode;
++#define PPC_BFIELD(x) ((0x1ULL)<<(63-x))
++  counters[ 0] += (texasr & PPC_BFIELD( 7))? 1 : 0;
++  counters[ 1] += (texasr & PPC_BFIELD( 8))? 1 : 0;
++  counters[ 2] += (texasr & PPC_BFIELD( 9))? 1 : 0;
++  counters[ 3] += (texasr & PPC_BFIELD(10))? 1 : 0;
++  counters[ 4] += (texasr & PPC_BFIELD(11))? 1 : 0;
++  counters[ 5] += (texasr & PPC_BFIELD(12))? 1 : 0;
++  counters[ 6] += (texasr & PPC_BFIELD(13))? 1 : 0;
++  counters[ 7] += (texasr & PPC_BFIELD(14))? 1 : 0;
++  counters[ 8] += (texasr & PPC_BFIELD(15))? 1 : 0;
++  counters[ 9] += (texasr & PPC_BFIELD(16))? 1 : 0;
++  counters[10] += (texasr & PPC_BFIELD(31))? 1 : 0;
++  counters[11] += (texasr & (PPC_BFIELD(7) | PPC_BFIELD(8) | PPC_BFIELD(9) | PPC_BFIELD(10) | PPC_BFIELD(11) | PPC_BFIELD(12) | PPC_BFIELD(13) | PPC_BFIELD(14) | PPC_BFIELD(15) | PPC_BFIELD(16) | PPC_BFIELD(31))) ? 0 : 1;  /* Other */
++#else
++#error
++#endif
++}
++
++const char *
++getHTMFailureName(int id)
++{
++  const char *reason_strings[] = {
++#if defined(__370__)
++    "TDB_not_set",
++    "Restart_interruption",
++    "External_interruption",
++    "Program_interruption",
++    "Machine-check_interruption",
++    "I/O_interruption",
++    "Fetch_overflow",
++    "Store_overflow",
++    "Fetch_conflict",
++    "Store_conflict",
++    "Restricted_instruction",
++    "Program-interruption_condition",
++    "Nesting_depth_exceeded",
++    "Cache_fetch-related",
++    "Cache_store-related",
++    "Cache_other",
++    "CTEND_abort",
++    "Miscellaneous_condition",
++    "TABORT_instruction"
++#elif defined(__x86_64__)
++    "XABORT",
++    "TRANSIENT",
++    "MEMADDR_CONFLICT",
++    "BUFFER_OVERFLOW",
++    "HIT_DEBUG_BREAKPOINT",
++    "DURING_NESTED_TRANSACTION",
++    "OTHER"
++#elif defined(__PPC__) || defined(_ARCH_PPC)
++    "Failure_Persistent",
++    "Disallowed",
++    "Nesting_Overflow",
++    "Footprint_Overflow",
++    "Self_Induced_Conflict",
++    "Non_Tx_Conflict",
++    "Tx_Conflict",
++    "Translation_Invalidation",
++    "Implementation_Specific",
++    "Instruction_Fetch_Conflict",
++    "Tabort_Treclaim",
++    "Other"
++#else
++#error
++#endif
++  };
++
++  if (id < 0 || NUM_HTM_FAILURE_REASONS <= id) {
++    return NULL;
++  }
++  return reason_strings[id];
++}
+diff -ruN -x build ga/src/ll/CMakeLists.txt gb/src/ll/CMakeLists.txt
+--- ga/src/ll/CMakeLists.txt	2026-11-09 11:50:07.809785655 +0900
++++ gb/src/ll/CMakeLists.txt	2025-01-14 12:41:16.000000000 +0900
+@@ -14,6 +14,17 @@
+   set(hwtopo "None")
+ endif()
+ 
++if (USE_HTM)
++  add_definitions(-DGALOIS_USE_HTM)
++  if (USE_INTEL)
++    add_definitions(-DGALOIS_USE_INTEL)
++    message(STATUS "HWTOPO INTEL Enabled")
++  elseif (USE_POWER)
++    add_definitions(-DGALOIS_USE_POWER)
++    message(STATUS "HWTOPO POWER Enabled")
++  endif()
++endif()
++
+ add_internal_library(ll EnvCheck.cpp gIO.cpp HWTopo.cpp
+   HWTopo${hwtopo}.cpp SimpleLock.cpp
+   TID.cpp)
+diff -ruN -x build ga/src/ll/HWTopoNone.cpp gb/src/ll/HWTopoNone.cpp
+--- ga/src/ll/HWTopoNone.cpp	2026-11-09 11:50:07.809785655 +0900
++++ gb/src/ll/HWTopoNone.cpp	2025-01-14 12:41:16.000000000 +0900
+@@ -28,12 +28,36 @@
+ #include "Galois/Runtime/ll/gio.h"
+ 
+ #include <vector>
++#include <cassert>
++#include <cstdio>
++#include <cstring>
++#include <cerrno>
++
+ #include <sched.h>
+ 
++
++
+ using namespace Galois::Runtime::LL;
+ 
+ namespace {
+ 
++static bool linuxBindToProcessor(int proc) {
++  cpu_set_t mask;
++  /* CPU_ZERO initializes all the bits in the mask to zero. */
++  CPU_ZERO( &mask );
++  
++  /* CPU_SET sets only the bit corresponding to cpu. */
++  // void to cancel unused result warning
++  (void)CPU_SET( proc, &mask );
++  
++  /* sched_setaffinity returns 0 in success */
++  if( sched_setaffinity( 0, sizeof(mask), &mask ) == -1 ) {
++    gWarn("Could not set CPU affinity for thread ", proc, "(", strerror(errno), ")");
++    return false;
++  }
++  return true;
++}
++
+ //! Flat machine with the correct number of threads and binding
+ struct Policy {
+   std::vector<int> procmap; //Galois id -> cpu id
+@@ -41,11 +65,55 @@
+   unsigned numThreads, numCores, numPackages;
+ 
+   Policy() {
++    #ifdef GALOIS_USE_HTM
++      #ifdef GALOIS_USE_POWER
++        unsigned int maxPhysicalCoreNum = 16;
++        unsigned int poolingThreads = maxPhysicalCoreNum;
++        unsigned int maxLogicalCoreNum = 64;
++      #elif defined(GALOIS_USE_INTEL)
++        unsigned int maxPhysicalCoreNum = 40;
++        unsigned int poolingThreads = maxPhysicalCoreNum;
++        unsigned int maxLogicalCoreNum = 40;
++      #else
++        unsigned int maxPhysicalCoreNum = 22;
++        unsigned int poolingThreads = maxPhysicalCoreNum;
++        unsigned int maxLogicalCoreNum = 44;
++      #endif
++    #endif
++
++    #if 0
++    printf("TOPO -- Stampede original setting\n");
+     for (int i = 0; i < 16; ++i) {
+       for (int j = 0; j < 4; ++j) {
+         procmap.push_back(j*16 + i);
+       }
+     }
++
++    #elif 0
++    for (unsigned int i = 0; i < poolingThreads; i++) {
++      procmap.push_back(i % maxLogicalCoreNum);
++      printf("TOPO -- SEQ ABOUT LOGICAL NO %d / %d\n", i, poolingThreads);
++    }
++
++    #else
++      for (int i = 0; i < poolingThreads; i++) {
++      #ifdef GALOIS_USE_HTM
++        #ifdef GALOIS_USE_POWER
++          unsigned int targetCPU = (((i+1) * 4)+((i+1) / maxPhysicalCoreNum)) % maxLogicalCoreNum;
++          // printf("TOPO -- GALOIS_USE_POWER Thr.%d -> Proc.%d\n", i, targetCPU);
++        #elif defined(GALOIS_USE_INTEL)
++          unsigned int targetCPU = (i+1) % maxLogicalCoreNum;
++          // printf("TOPO -- GALOIS_USE_INTEL Thr.%d -> Proc.%d\n", i, targetCPU);
++        #else
++          printf("TOPO -- GALOIS_USE_?\n");
++          unsigned int targetCPU = (i+1);   
++        #endif
++      #else
++        unsigned int targetCPU = i;
++      #endif
++          procmap.push_back(targetCPU);
++      }
++    #endif
+     numThreads = procmap.size();
+     numCores = procmap.size();
+     numPackages = 1;
+@@ -60,7 +128,8 @@
+ } //namespace
+ 
+ bool Galois::Runtime::LL::bindThreadToProcessor(int id) {
+-  return true;
++  assert(id < (int)getPolicy().procmap.size());
++  return linuxBindToProcessor(getPolicy().procmap[id]);
+ }
+ 
+ unsigned Galois::Runtime::LL::getProcessorForThread(int id) {

@@ -1,0 +1,1132 @@
+diff -ruN -X /tmp/exc master/stamp/intruder/decoder.c pandora-supplement/intruder/decoder.c
+--- master/stamp/intruder/decoder.c	2014-11-29 12:36:52.000000000 +0900
++++ pandora-supplement/intruder/decoder.c	2025-04-07 10:41:35.000000000 +0900
+@@ -72,8 +72,10 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include "decoder.h"
++#include "detector.h"
+ #include "error.h"
+ #include "list.h"
++#include "vector.h"
+ #include "map.h"
+ #include "packet.h"
+ #include "queue.h"
+@@ -81,16 +83,23 @@
+ #include "types.h"
+ 
+ 
+-struct decoder {
+-    MAP_T* fragmentedMapPtr;  /* contains list of packet_t* */
+-    queue_t* decodedQueuePtr; /* contains decoded_t* */
+-};
++// struct decoder {
++//     MAP_T* fragmentedMapPtr;  /* contains list of packet_t* */
++//     queue_t* decodedQueuePtr; /* contains decoded_t* */
++// };
+ 
+ typedef struct decoded {
+     long flowId;
+     char* data;
+ } decoded_t;
+ 
++typedef struct fragment_array {
++    packet_t** packets;
++    long numFragment;
++    long flowId;
++    long size;
++} fragment_array_t;
++
+ 
+ /* =============================================================================
+  * decoder_alloc
+@@ -101,12 +110,12 @@
+ {
+     decoder_t* decoderPtr;
+ 
+-    decoderPtr = (decoder_t*)malloc(sizeof(decoder_t));
++    decoderPtr = (decoder_t*)P_MALLOC(sizeof(decoder_t));
+     if (decoderPtr) {
+         decoderPtr->fragmentedMapPtr = MAP_ALLOC(NULL, NULL);
+         assert(decoderPtr->fragmentedMapPtr);
+-        decoderPtr->decodedQueuePtr = queue_alloc(1024);
+-        assert(decoderPtr->decodedQueuePtr);
++        // decoderPtr->decodedQueuePtr = queue_alloc(1024);
++        // assert(decoderPtr->decodedQueuePtr);
+     }
+ 
+     return decoderPtr;
+@@ -120,9 +129,9 @@
+ void
+ decoder_free (decoder_t* decoderPtr)
+ {
+-    queue_free(decoderPtr->decodedQueuePtr);
++    // queue_free(decoderPtr->decodedQueuePtr);
+     MAP_FREE(decoderPtr->fragmentedMapPtr);
+-    free(decoderPtr);
++    P_FREE(decoderPtr);
+ }
+ 
+ 
+@@ -131,7 +140,7 @@
+  * =============================================================================
+  */
+ error_t
+-decoder_process (decoder_t* decoderPtr, char* bytes, long numByte)
++decoder_process (decoder_t* decoderPtr, detector_t* detectorPtr, char* bytes, long numByte)
+ {
+     bool_t status;
+ 
+@@ -149,6 +158,8 @@
+     long numFragment = packetPtr->numFragment;
+     long length      = packetPtr->length;
+ 
++    long i;
++
+     if (flowId < 0) {
+         return ERROR_FLOWID;
+     }
+@@ -177,28 +188,28 @@
+     if (numFragment > 1) {
+ 
+         MAP_T* fragmentedMapPtr = decoderPtr->fragmentedMapPtr;
+-        list_t* fragmentListPtr =
+-            (list_t*)MAP_FIND(fragmentedMapPtr, (void*)flowId);
++        fragment_array_t* fragmentArrayPtr =
++            (fragment_array_t*)MAP_FIND(fragmentedMapPtr, (void*)flowId);
+ 
+-        if (fragmentListPtr == NULL) {
++        if (fragmentArrayPtr == NULL) {
++
++            fragmentArrayPtr = (fragment_array_t*)P_MALLOC(sizeof(fragment_array_t));
++            assert(fragmentArrayPtr);
++            fragmentArrayPtr->packets = (packet_t**)P_MALLOC(sizeof(packet_t*) * numFragment);
++
++            fragmentArrayPtr->numFragment = numFragment;
++            fragmentArrayPtr->flowId = flowId;
++            fragmentArrayPtr->size = 1;
++            fragmentArrayPtr->packets[fragmentId] = packetPtr;
+ 
+-            fragmentListPtr = list_alloc(&packet_compareFragmentId);
+-            assert(fragmentListPtr);
+-            status = list_insert(fragmentListPtr, (void*)packetPtr);
+-            assert(status);
+             status = MAP_INSERT(fragmentedMapPtr,
+                                 (void*)flowId,
+-                                (void*)fragmentListPtr);
++                                (void*)fragmentArrayPtr);
+             assert(status);
+ 
+         } else {
+ 
+-            list_iter_t it;
+-            list_iter_reset(&it, fragmentListPtr);
+-            assert(list_iter_hasNext(&it, fragmentListPtr));
+-            packet_t* firstFragmentPtr =
+-                (packet_t*)list_iter_next(&it, fragmentListPtr);
+-            long expectedNumFragment = firstFragmentPtr->numFragment;
++            long expectedNumFragment = fragmentArrayPtr->numFragment;
+ 
+             if (numFragment != expectedNumFragment) {
+                 status = MAP_REMOVE(fragmentedMapPtr, (void*)flowId);
+@@ -206,56 +217,43 @@
+                 return ERROR_NUMFRAGMENT;
+             }
+ 
+-            status = list_insert(fragmentListPtr, (void*)packetPtr);
+-            assert(status);
++            fragmentArrayPtr->packets[fragmentId] = packetPtr;
++            fragmentArrayPtr->size++;
+ 
+             /*
+              * If we have all the fragments we can reassemble them
+              */
+ 
+-            if (list_getSize(fragmentListPtr) == numFragment) {
++            if (fragmentArrayPtr->size == numFragment) {
+ 
+                 long numByte = 0;
+-                long i = 0;
+-                list_iter_reset(&it, fragmentListPtr);
+-                while (list_iter_hasNext(&it, fragmentListPtr)) {
+-                    packet_t* fragmentPtr =
+-                        (packet_t*)list_iter_next(&it, fragmentListPtr);
++                for (i = 0; i < numFragment; ++i) {
++                    packet_t* fragmentPtr = fragmentArrayPtr->packets[i];
+                     assert(fragmentPtr->flowId == flowId);
+-                    if (fragmentPtr->fragmentId != i) {
+-                        status = MAP_REMOVE(fragmentedMapPtr, (void*)flowId);
+-                        assert(status);
+-                        return ERROR_INCOMPLETE; /* should be sequential */
+-                    }
++                    // if (fragmentPtr->fragmentId != i) {
++                    //     status = MAP_REMOVE(fragmentedMapPtr, (void*)flowId);
++                    //     assert(status);
++                    //     return ERROR_INCOMPLETE; /* should be sequential */
++                    // }
+                     numByte += fragmentPtr->length;
+-                    i++;
+                 }
+ 
+-                char* data = (char*)malloc(numByte + 1);
++                char* data = (char*)P_MALLOC(numByte + 1);
+                 assert(data);
+                 data[numByte] = '\0';
+                 char* dst = data;
+-                list_iter_reset(&it, fragmentListPtr);
+-                while (list_iter_hasNext(&it, fragmentListPtr)) {
+-                    packet_t* fragmentPtr =
+-                        (packet_t*)list_iter_next(&it, fragmentListPtr);
++                for (i = 0; i < numFragment; ++i) {
++                    packet_t* fragmentPtr = fragmentArrayPtr->packets[i];
+                     memcpy(dst, fragmentPtr->data, fragmentPtr->length);
+                     dst += fragmentPtr->length;
+                 }
+                 assert(dst == data + numByte);
+ 
+-                decoded_t* decodedPtr = (decoded_t*)malloc(sizeof(decoded_t));
+-                assert(decodedPtr);
+-                decodedPtr->flowId = flowId;
+-                decodedPtr->data = data;
+-
+-                queue_t* decodedQueuePtr = decoderPtr->decodedQueuePtr;
+-                status = queue_push(decodedQueuePtr, (void*)decodedPtr);
+-                assert(status);
+-
+-                list_free(fragmentListPtr);
++                PVECTOR_FREE(fragmentArrayPtr);
+                 status = MAP_REMOVE(fragmentedMapPtr, (void*)flowId);
+                 assert(status);
++
++                return PDETECTOR_PROCESS(detectorPtr, data);
+             }
+ 
+         }
+@@ -270,20 +268,12 @@
+             return ERROR_FRAGMENTID;
+         }
+ 
+-        char* data = (char*)malloc(length + 1);
++        char* data = (char*)P_MALLOC(length + 1);
+         assert(data);
+         data[length] = '\0';
+         memcpy(data, packetPtr->data, length);
+ 
+-        decoded_t* decodedPtr = (decoded_t*)malloc(sizeof(decoded_t));
+-        assert(decodedPtr);
+-        decodedPtr->flowId = flowId;
+-        decodedPtr->data = data;
+-
+-        queue_t* decodedQueuePtr = decoderPtr->decodedQueuePtr;
+-        status = queue_push(decodedQueuePtr, (void*)decodedPtr);
+-        assert(status);
+-
++        return PDETECTOR_PROCESS(detectorPtr, data);
+     }
+ 
+     return ERROR_NONE;
+@@ -295,7 +285,7 @@
+  * =============================================================================
+  */
+ error_t
+-TMdecoder_process (TM_ARGDECL  decoder_t* decoderPtr, char* bytes, long numByte)
++TMdecoder_process (TM_ARGDECL decoder_t* decoderPtr, detector_t* detectorPtr, char* bytes, long numByte)
+ {
+     bool_t status;
+ 
+@@ -313,6 +303,8 @@
+     long numFragment = packetPtr->numFragment;
+     long length      = packetPtr->length;
+ 
++    long i;
++
+     if (flowId < 0) {
+         return ERROR_FLOWID;
+     }
+@@ -341,28 +333,28 @@
+     if (numFragment > 1) {
+ 
+         MAP_T* fragmentedMapPtr = decoderPtr->fragmentedMapPtr;
+-        list_t* fragmentListPtr =
+-            (list_t*)TMMAP_FIND(fragmentedMapPtr, (void*)flowId);
++        fragment_array_t* fragmentArrayPtr =
++            (fragment_array_t*)TMMAP_FIND(fragmentedMapPtr, (void*)flowId);
+ 
+-        if (fragmentListPtr == NULL) {
++        if (fragmentArrayPtr == NULL) {
++
++            fragmentArrayPtr = (fragment_array_t*)TM_MALLOC(sizeof(fragment_array_t));
++            assert(fragmentArrayPtr);
++            fragmentArrayPtr->packets = (packet_t**)TM_MALLOC(sizeof(packet_t*) * numFragment);
++
++            fragmentArrayPtr->numFragment = numFragment;
++            fragmentArrayPtr->flowId = flowId;
++            fragmentArrayPtr->size = 1;
++            fragmentArrayPtr->packets[fragmentId] = packetPtr;
+ 
+-            fragmentListPtr = TMLIST_ALLOC(&packet_compareFragmentId);
+-            assert(fragmentListPtr);
+-            status = TMLIST_INSERT(fragmentListPtr, (void*)packetPtr);
+-            assert(status);
+             status = TMMAP_INSERT(fragmentedMapPtr,
+-                                  (void*)flowId,
+-                                  (void*)fragmentListPtr);
++                                (void*)flowId,
++                                (void*)fragmentArrayPtr);
+             assert(status);
+ 
+         } else {
+ 
+-            list_iter_t it;
+-            TMLIST_ITER_RESET(&it, fragmentListPtr);
+-            assert(TMLIST_ITER_HASNEXT(&it, fragmentListPtr));
+-            packet_t* firstFragmentPtr =
+-                (packet_t*)TMLIST_ITER_NEXT(&it, fragmentListPtr);
+-            long expectedNumFragment = firstFragmentPtr->numFragment;
++            long expectedNumFragment = fragmentArrayPtr->numFragment;
+ 
+             if (numFragment != expectedNumFragment) {
+                 status = TMMAP_REMOVE(fragmentedMapPtr, (void*)flowId);
+@@ -370,56 +362,44 @@
+                 return ERROR_NUMFRAGMENT;
+             }
+ 
+-            status = TMLIST_INSERT(fragmentListPtr, (void*)packetPtr);
+-            assert(status);
++            TM_SHARED_WRITE_P(fragmentArrayPtr->packets[fragmentId], packetPtr);
++            TM_SHARED_WRITE(fragmentArrayPtr->size, TM_SHARED_READ(fragmentArrayPtr->size)+1);
+ 
+             /*
+              * If we have all the fragments we can reassemble them
+              */
+ 
+-            if (TMLIST_GETSIZE(fragmentListPtr) == numFragment) {
++            if (TM_SHARED_READ(fragmentArrayPtr->size) == numFragment) {
+ 
+                 long numByte = 0;
+-                long i = 0;
+-                TMLIST_ITER_RESET(&it, fragmentListPtr);
+-                while (TMLIST_ITER_HASNEXT(&it, fragmentListPtr)) {
++                for (i = 0; i < numFragment; ++i) {
+                     packet_t* fragmentPtr =
+-                        (packet_t*)TMLIST_ITER_NEXT(&it, fragmentListPtr);
++                        TM_SHARED_READ_P(fragmentArrayPtr->packets[i]);
+                     assert(fragmentPtr->flowId == flowId);
+-                    if (fragmentPtr->fragmentId != i) {
+-                        status = TMMAP_REMOVE(fragmentedMapPtr, (void*)flowId);
+-                        assert(status);
+-                        return ERROR_INCOMPLETE; /* should be sequential */
+-                    }
++                    // if (fragmentPtr->fragmentId != i) {
++                    //     status = TMMAP_REMOVE(fragmentedMapPtr, (void*)flowId);
++                    //     assert(status);
++                    //     return ERROR_INCOMPLETE; /* should be sequential */
++                    // }
+                     numByte += fragmentPtr->length;
+-                    i++;
+                 }
+ 
+                 char* data = (char*)TM_MALLOC(numByte + 1);
+                 assert(data);
+                 data[numByte] = '\0';
+                 char* dst = data;
+-                TMLIST_ITER_RESET(&it, fragmentListPtr);
+-                while (TMLIST_ITER_HASNEXT(&it, fragmentListPtr)) {
++                for (i = 0; i < numFragment; ++i) {
+                     packet_t* fragmentPtr =
+-                        (packet_t*)TMLIST_ITER_NEXT(&it, fragmentListPtr);
++                        TM_SHARED_READ_P(fragmentArrayPtr->packets[i]);
+                     memcpy(dst, fragmentPtr->data, fragmentPtr->length);
+                     dst += fragmentPtr->length;
+                 }
+                 assert(dst == data + numByte);
+-
+-                decoded_t* decodedPtr = (decoded_t*)TM_MALLOC(sizeof(decoded_t));
+-                assert(decodedPtr);
+-                decodedPtr->flowId = flowId;
+-                decodedPtr->data = data;
+-
+-                queue_t* decodedQueuePtr = decoderPtr->decodedQueuePtr;
+-                status = TMQUEUE_PUSH(decodedQueuePtr, (void*)decodedPtr);
+-                assert(status);
+-
+-                TMLIST_FREE(fragmentListPtr);
++                TM_FREE(fragmentArrayPtr);
+                 status = TMMAP_REMOVE(fragmentedMapPtr, (void*)flowId);
+                 assert(status);
++
++                return PDETECTOR_PROCESS(detectorPtr, data);
+             }
+ 
+         }
+@@ -439,15 +419,7 @@
+         data[length] = '\0';
+         memcpy(data, packetPtr->data, length);
+ 
+-        decoded_t* decodedPtr = (decoded_t*)TM_MALLOC(sizeof(decoded_t));
+-        assert(decodedPtr);
+-        decodedPtr->flowId = flowId;
+-        decodedPtr->data = data;
+-
+-        queue_t* decodedQueuePtr = decoderPtr->decodedQueuePtr;
+-        status = TMQUEUE_PUSH(decodedQueuePtr, (void*)decodedPtr);
+-        assert(status);
+-
++        return PDETECTOR_PROCESS(detectorPtr, data);
+     }
+ 
+     return ERROR_NONE;
+@@ -468,7 +440,7 @@
+     if (decodedPtr) {
+         *decodedFlowIdPtr = decodedPtr->flowId;
+         data = decodedPtr->data;
+-        free(decodedPtr);
++        P_FREE(decodedPtr);
+     } else {
+         *decodedFlowIdPtr = -1;
+         data = NULL;
+diff -ruN -X /tmp/exc master/stamp/intruder/decoder.h pandora-supplement/intruder/decoder.h
+--- master/stamp/intruder/decoder.h	2014-11-29 12:36:52.000000000 +0900
++++ pandora-supplement/intruder/decoder.h	2025-04-07 10:41:35.000000000 +0900
+@@ -74,9 +74,14 @@
+ 
+ #include "error.h"
+ #include "tm.h"
+-
+-typedef struct decoder decoder_t;
+-
++#include "detector.h"
++#include "map.h"
++#include "queue.h"
++
++typedef struct decoder {
++    MAP_T* fragmentedMapPtr;  /* contains list of packet_t* */
++    queue_t* decodedQueuePtr; /* contains decoded_t* */
++} decoder_t;
+ 
+ /* =============================================================================
+  * decoder_alloc
+@@ -99,7 +104,7 @@
+  * =============================================================================
+  */
+ error_t
+-decoder_process (decoder_t* decoderPtr, char* bytes, long numByte);
++decoder_process (decoder_t* decoderPtr, detector_t* detectorPtr, char* bytes, long numByte);
+ 
+ 
+ /* =============================================================================
+@@ -107,7 +112,7 @@
+  * =============================================================================
+  */
+ error_t
+-TMdecoder_process (TM_ARGDECL  decoder_t* decoderPtr, char* bytes, long numByte);
++TMdecoder_process (TM_ARGDECL  decoder_t* decoderPtr, detector_t* detectorPtr, char* bytes, long numByte);
+ 
+ 
+ /* =============================================================================
+@@ -128,7 +133,7 @@
+ TMdecoder_getComplete (TM_ARGDECL  decoder_t* decoderPtr, long* decodedFlowIdPtr);
+ 
+ 
+-#define TMDECODER_PROCESS(d, b, n)      TMdecoder_process(TM_ARG  d, b, n)
++#define TMDECODER_PROCESS(dc, dt, b, n) TMdecoder_process(TM_ARG  dc, dt, b, n)
+ #define TMDECODER_GETCOMPLETE(d, f)     TMdecoder_getComplete(TM_ARG  d, f)
+ 
+ 
+diff -ruN -X /tmp/exc master/stamp/intruder/detector.c pandora-supplement/intruder/detector.c
+--- master/stamp/intruder/detector.c	2014-11-29 12:36:52.000000000 +0900
++++ pandora-supplement/intruder/detector.c	2024-11-22 04:29:37.000000000 +0900
+@@ -94,11 +94,11 @@
+ {
+     detector_t* detectorPtr;
+ 
+-    detectorPtr = (detector_t*)malloc(sizeof(detector_t));
++    detectorPtr = (detector_t*)P_MALLOC(sizeof(detector_t));
+     if (detectorPtr) {
+         detectorPtr->dictionaryPtr = dictionary_alloc();
+         assert(detectorPtr->dictionaryPtr);
+-        detectorPtr->preprocessorVectorPtr = vector_alloc(1);
++        detectorPtr->preprocessorVectorPtr = vector_alloc(0);
+         assert(detectorPtr->preprocessorVectorPtr);
+     }
+ 
+@@ -119,7 +119,7 @@
+     if (detectorPtr) {
+         detectorPtr->dictionaryPtr = PDICTIONARY_ALLOC();
+         assert(detectorPtr->dictionaryPtr);
+-        detectorPtr->preprocessorVectorPtr = PVECTOR_ALLOC(1);
++        detectorPtr->preprocessorVectorPtr = PVECTOR_ALLOC(0);
+         assert(detectorPtr->preprocessorVectorPtr);
+     }
+ 
+@@ -136,7 +136,7 @@
+ {
+     dictionary_free(detectorPtr->dictionaryPtr);
+     vector_free(detectorPtr->preprocessorVectorPtr);
+-    free(detectorPtr);
++    P_FREE(detectorPtr);
+ }
+ 
+ 
+diff -ruN -X /tmp/exc master/stamp/intruder/dictionary.c pandora-supplement/intruder/dictionary.c
+--- master/stamp/intruder/dictionary.c	2014-11-29 12:36:52.000000000 +0900
++++ pandora-supplement/intruder/dictionary.c	2024-11-22 04:29:38.000000000 +0900
+@@ -163,7 +163,7 @@
+ dictionary_t*
+ dictionary_alloc ()
+ {
+-    dictionary_t* dictionaryPtr = vector_alloc(global_numDefaultSignature);
++    dictionary_t* dictionaryPtr = vector_alloc(0);
+ 
+     if (dictionaryPtr) {
+         long s;
+@@ -186,7 +186,7 @@
+ dictionary_t*
+ Pdictionary_alloc ()
+ {
+-    dictionary_t* dictionaryPtr = PVECTOR_ALLOC(global_numDefaultSignature);
++    dictionary_t* dictionaryPtr = PVECTOR_ALLOC(0);
+ 
+     if (dictionaryPtr) {
+         long s;
+diff -ruN -X /tmp/exc master/stamp/intruder/intruder.c pandora-supplement/intruder/intruder.c
+--- master/stamp/intruder/intruder.c	2014-11-29 12:36:52.000000000 +0900
++++ pandora-supplement/intruder/intruder.c	2026-07-23 16:06:51.000000000 +0900
+@@ -81,6 +81,19 @@
+ #include "thread.h"
+ #include "timer.h"
+ #include "tm.h"
++#include "map.h"
++#include "utility.h"
++
++#define CHUNK_STREAM 256
++#define CHUNK_DECODE 16
++
++#ifdef FINE_LOCK
++LOCK_T stream_lock;
++LOCK_T* table_locks;
++
++#undef CHUNK_SIZE
++#define CHUNK_SIZE 128
++#endif
+ 
+ enum param_types {
+     PARAM_ATTACK = (unsigned char)'a',
+@@ -171,6 +184,7 @@
+     }
+ }
+ 
++#ifndef FINE_LOCK
+ 
+ /* =============================================================================
+  * processPackets
+@@ -193,49 +207,192 @@
+ 
+     vector_t* errorVectorPtr = errorVectors[threadId];
+ 
+-    while (1) {
+-
+-        char* bytes;
++    int i, j;
++    bool_t is_finish = FALSE;
++    long flowIds[CHUNK_DECODE];
++    long found;
++
++    while (!is_finish) {
++#ifdef DISTRIDUTEDPACKET
++        char* bytes_array[CHUNK_STREAM];
++        for (i = 0; i < CHUNK_STREAM; ++i) {
++            bytes_array[i] = stream_getPacket(streamPtr,threadId);
++            if (!bytes_array[i]) {
++                break;
++            }
++        }
++#else
++        char* bytes_array[CHUNK_STREAM];
+         TM_BEGIN();
+-        bytes = TMSTREAM_GETPACKET(streamPtr);
++        for (i = 0; i < CHUNK_STREAM; ++i) {
++            bytes_array[i] = TMSTREAM_GETPACKET(streamPtr);
++            if (!bytes_array[i]) {
++                break;
++            }
++        }
+         TM_END();
+-        if (!bytes) {
+-            break;
++#endif
++
++        for (i = 0; i < CHUNK_STREAM && !is_finish; i += CHUNK_DECODE) {
++#ifndef FINE_TX
++            TM_BEGIN();
++#endif
++            found = 0;
++            long ii;
++            long ii_stop = MIN(CHUNK_STREAM, (i+CHUNK_DECODE));
++            for (ii = i; ii < ii_stop; ++ii) {
++                packet_t* packetPtr = (packet_t*)bytes_array[ii];
++                if (!packetPtr) {
++                    is_finish = TRUE;
++                    break;
++                }
++#ifdef FINE_TX
++                TM_BEGIN();
++#endif
++                error_t error;
++                error = TMDECODER_PROCESS(decoderPtr,
++                                          detectorPtr,
++                                          bytes_array[ii],
++                                          (PACKET_HEADER_LENGTH + packetPtr->length));
++                
++#ifdef FINE_TX
++                TM_END();
++#endif
++                if (error) {
++                    if (error == ERROR_SIGNATURE) {
++                        flowIds[found] = packetPtr->flowId;
++                        ++found;
++                    } else {
++                        /*
++                        * Currently, stream_generate() does not create these errors.
++                        */
++                        assert(0);
++                        bool_t status = PVECTOR_PUSHBACK(errorVectorPtr,
++                                                         (void*)packetPtr->flowId);
++                        assert(status);
++                    }
++                }
++            }
++#ifndef FINE_TX
++            TM_END();
++#endif
++            for (ii = 0; ii < found; ++ii) {
++                bool_t status = PVECTOR_PUSHBACK(errorVectorPtr,
++                                                (void*)flowIds[ii]);
++                assert(status);
++            }
++#if 0
++            char* data;
++            long decodedFlowId;
++            TM_BEGIN();
++            data = TMDECODER_GETCOMPLETE(decoderPtr, &decodedFlowId);
++            TM_END();
++            if (data) {
++                error_t error = PDETECTOR_PROCESS(detectorPtr, data);
++                P_FREE(data);
++                if (error) {
++                    bool_t status = PVECTOR_PUSHBACK(errorVectorPtr,
++                                                    (void*)decodedFlowId);
++                    assert(status);
++                }
++            }
++#endif
+         }
++    }
+ 
+-        packet_t* packetPtr = (packet_t*)bytes;
+-        long flowId = packetPtr->flowId;
++    PDETECTOR_FREE(detectorPtr);
+ 
+-        error_t error;
+-        TM_BEGIN();
+-        error = TMDECODER_PROCESS(decoderPtr,
+-                                  bytes,
+-                                  (PACKET_HEADER_LENGTH + packetPtr->length));
+-        TM_END();
+-        if (error) {
+-            /*
+-             * Currently, stream_generate() does not create these errors.
+-             */
+-            assert(0);
+-            bool_t status = PVECTOR_PUSHBACK(errorVectorPtr, (void*)flowId);
+-            assert(status);
++    TM_THREAD_EXIT();
++}
++
++#else
++
++/* =============================================================================
++ * processPackets
++ * =============================================================================
++ */
++void
++processPackets (void* argPtr)
++{
++    TM_THREAD_ENTER();
++
++    long threadId = thread_getId();
++
++    stream_t*   streamPtr    = ((arg_t*)argPtr)->streamPtr;
++    decoder_t*  decoderPtr   = ((arg_t*)argPtr)->decoderPtr;
++    vector_t**  errorVectors = ((arg_t*)argPtr)->errorVectors;
++
++    detector_t* detectorPtr = PDETECTOR_ALLOC();
++    assert(detectorPtr);
++    PDETECTOR_ADDPREPROCESSOR(detectorPtr, &preprocessor_toLower);
++
++    vector_t* errorVectorPtr = errorVectors[threadId];
++
++    int i, j;
++    bool_t is_finish = FALSE;
++
++    while (!is_finish) {
++
++        char* bytes_array[CHUNK_SIZE];
++        LOCK(stream_lock);
++        for (i = 0; i < CHUNK_SIZE; ++i) {
++            bytes_array[i] = TMSTREAM_GETPACKET(streamPtr);
++            if (!bytes_array[i]) {
++                break;
++            }
+         }
++        UNLOCK(stream_lock);
+ 
+-        char* data;
+-        long decodedFlowId;
+-        TM_BEGIN();
+-        data = TMDECODER_GETCOMPLETE(decoderPtr, &decodedFlowId);
+-        TM_END();
+-        if (data) {
+-            error_t error = PDETECTOR_PROCESS(detectorPtr, data);
+-            P_FREE(data);
++        for (j = 0; j < CHUNK_SIZE; ++j) {
++            packet_t* packetPtr = (packet_t*)bytes_array[j];
++            if (!packetPtr) {
++                is_finish = TRUE;
++                break;
++            }
++
++            long flowId = packetPtr->flowId;
++            error_t error;
++
++            MAP_T* fragmentedMapPtr = decoderPtr->fragmentedMapPtr;
++            long idx = fragmentedMapPtr->hash(flowId) % fragmentedMapPtr->numBucket;
++
++            LOCK(table_locks[idx]);
++            error = TMDECODER_PROCESS(decoderPtr,
++                                      detectorPtr,
++                                      bytes_array[j],
++                                      (PACKET_HEADER_LENGTH + packetPtr->length));
++            UNLOCK(table_locks[idx]);
+             if (error) {
+-                bool_t status = PVECTOR_PUSHBACK(errorVectorPtr,
+-                                                 (void*)decodedFlowId);
+-                assert(status);
++                if (error == ERROR_SIGNATURE) {
++                    bool_t status = PVECTOR_PUSHBACK(errorVectorPtr,
++                                                    (void*)flowId);
++                    assert(status);
++                } else {
++                    /*
++                    * Currently, stream_generate() does not create these errors.
++                    */
++                    assert(0);
++                    bool_t status = PVECTOR_PUSHBACK(errorVectorPtr, (void*)flowId);
++                    assert(status);
++                }
++            }
++#if 0
++            char* data;
++            long decodedFlowId;
++            TM_BEGIN();
++            data = TMDECODER_GETCOMPLETE(decoderPtr, &decodedFlowId);
++            TM_END();
++            if (data) {
++                error_t error = PDETECTOR_PROCESS(detectorPtr, data);
++                P_FREE(data);
++                if (error) {
++                    bool_t status = PVECTOR_PUSHBACK(errorVectorPtr,
++                                                    (void*)decodedFlowId);
++                    assert(status);
++                }
+             }
++#endif
+         }
+-
+     }
+ 
+     PDETECTOR_FREE(detectorPtr);
+@@ -243,6 +400,7 @@
+     TM_THREAD_EXIT();
+ }
+ 
++#endif
+ 
+ /* =============================================================================
+  * main
+@@ -257,11 +415,26 @@
+      */
+ 
+     parseArgs(argc, (char** const)argv);
+-    long numThread = global_params[PARAM_THREAD];
+-    SIM_GET_NUM_CPU(numThread);
+-    TM_STARTUP(numThread);
++    long numCore = global_params[PARAM_THREAD];
++    long numThread = numCore * THREADS_PER_CORE;
++    {
++        char* s = getenv("THR_PER_CORE");
++        if (s != NULL)  {
++            numThread = numCore * strtol(s, NULL, 10);
++        }
++    }
++
++    SIM_GET_NUM_CPU(numCore);
++    TM_STARTUP(numCore);
+     P_MEMORY_STARTUP(numThread);
+-    thread_startup(numThread);
++    thread_startup(numCore, numThread);
++
++#if defined(HTM) || defined(STM)
++    printf("===========================\n");
++    printf(" * CHUNK_STREAM = %d\n", CHUNK_STREAM);
++    printf(" * CHUNK_DECODE = %d\n", CHUNK_DECODE);
++    printf("===========================\n\n");
++#endif
+ 
+     long percentAttack = global_params[PARAM_ATTACK];
+     long maxDataLength = global_params[PARAM_LENGTH];
+@@ -276,25 +449,44 @@
+     assert(dictionaryPtr);
+     stream_t* streamPtr = stream_alloc(percentAttack);
+     assert(streamPtr);
++#ifdef DISTRIDUTEDPACKET
++    long numAttack = stream_generate(streamPtr,
++                                     dictionaryPtr,
++                                     numFlow,
++                                     randomSeed,
++                                     maxDataLength,
++                                     numThread);
++#else
+     long numAttack = stream_generate(streamPtr,
+                                      dictionaryPtr,
+                                      numFlow,
+                                      randomSeed,
+                                      maxDataLength);
++#endif
+     printf("Num attack      = %li\n", numAttack);
+ 
+     decoder_t* decoderPtr = decoder_alloc();
+     assert(decoderPtr);
+ 
+-    vector_t** errorVectors = (vector_t**)malloc(numThread * sizeof(vector_t*));
++    vector_t** errorVectors = (vector_t**)P_MALLOC(numThread * sizeof(vector_t*));
+     assert(errorVectors);
+     long i;
+     for (i = 0; i < numThread; i++) {
+-        vector_t* errorVectorPtr = vector_alloc(numFlow);
++        vector_t* errorVectorPtr = vector_alloc(0);
+         assert(errorVectorPtr);
+         errorVectors[i] = errorVectorPtr;
+     }
+ 
++#ifdef FINE_LOCK
++    LOCK_INIT(stream_lock);
++    long nbucket = decoderPtr->fragmentedMapPtr->numBucket;
++    table_locks = (LOCK_T*)P_MALLOC(nbucket * sizeof(LOCK_T));
++    assert(table_locks);
++    for (i = 0; i < nbucket; ++i) {
++        LOCK_INIT(table_locks[i]);
++    }
++#endif
++
+     arg_t arg;
+     arg.streamPtr    = streamPtr;
+     arg.decoderPtr   = decoderPtr;
+@@ -312,14 +504,13 @@
+     {
+         processPackets((void*)&arg);
+     }
+-    
+ #else
+     thread_start(processPackets, (void*)&arg);
+ #endif
+     GOTO_REAL();
+     TIMER_T stopTime;
+     TIMER_READ(stopTime);
+-    printf("Elapsed time    = %f seconds\n", TIMER_DIFF_SECONDS(startTime, stopTime));
++    printf("Time = %f seconds\n", TIMER_DIFF_SECONDS(startTime, stopTime));
+ 
+     /*
+      * Check solution
+@@ -347,11 +538,15 @@
+     for (i = 0; i < numThread; i++) {
+         vector_free(errorVectors[i]);
+     }
+-    free(errorVectors);
++    P_FREE(errorVectors);
+     decoder_free(decoderPtr);
+     stream_free(streamPtr);
+     dictionary_free(dictionaryPtr);
+ 
++#ifdef FINE_LOCK
++    P_FREE(table_locks);
++#endif
++
+     TM_SHUTDOWN();
+     P_MEMORY_SHUTDOWN();
+ 
+diff -ruN -X /tmp/exc master/stamp/intruder/stream.c pandora-supplement/intruder/stream.c
+--- master/stamp/intruder/stream.c	2014-11-29 12:36:52.000000000 +0900
++++ pandora-supplement/intruder/stream.c	2025-03-19 11:05:14.000000000 +0900
+@@ -90,6 +90,9 @@
+     vector_t* allocVectorPtr;
+     queue_t* packetQueuePtr;
+     MAP_T* attackMapPtr;
++#ifdef DISTRIDUTEDPACKET
++    queue_t** packetQueues;
++#endif
+ };
+ 
+ 
+@@ -102,18 +105,28 @@
+ {
+     stream_t* streamPtr;
+ 
+-    streamPtr = (stream_t*)malloc(sizeof(stream_t));
++    streamPtr = (stream_t*)P_MALLOC(sizeof(stream_t));
+     if (streamPtr) {
+         assert(percentAttack >= 0 && percentAttack <= 100);
+         streamPtr->percentAttack = percentAttack;
+         streamPtr->randomPtr = random_alloc();
+         assert(streamPtr->randomPtr);
+-        streamPtr->allocVectorPtr = vector_alloc(1);
++        streamPtr->allocVectorPtr = vector_alloc(0);
+         assert(streamPtr->allocVectorPtr);
+         streamPtr->packetQueuePtr = queue_alloc(-1);
+         assert(streamPtr->packetQueuePtr);
+         streamPtr->attackMapPtr = MAP_ALLOC(NULL, NULL);
+         assert(streamPtr->attackMapPtr);
++#ifdef DISTRIDUTEDPACKET
++        long numThreads = thread_getNumThread();
++        assert(numThreads > 0);
++        streamPtr->packetQueues = (queue_t**)P_MALLOC(sizeof(queue_t*) * numThreads);
++        assert(streamPtr->packetQueues);
++        for (long i = 0; i < numThreads; i++) {
++            streamPtr->packetQueues[i] = queue_alloc(-1);
++            assert(streamPtr->packetQueues[i]);
++        }
++#endif
+     }
+ 
+     return streamPtr;
+@@ -133,14 +146,17 @@
+ 
+     for (a = 0; a < numAlloc; a++) {
+         char* str = (char*)vector_at(allocVectorPtr, a);
+-        free(str);
++        P_FREE(str);
+     }
+ 
+     MAP_FREE(streamPtr->attackMapPtr);
+     queue_free(streamPtr->packetQueuePtr);
+     vector_free(streamPtr->allocVectorPtr);
+     random_free(streamPtr->randomPtr);
+-    free(streamPtr);
++    P_FREE(streamPtr);
++#ifdef DISTRIDUTEDPACKET
++    queue_free(streamPtr->packetQueues);
++#endif
+ }
+ 
+ 
+@@ -165,7 +181,7 @@
+     long p;
+     for (p = 0; p < (numPacket - 1); p++) {
+         bool_t status;
+-        char* bytes = (char*)malloc(PACKET_HEADER_LENGTH + numDataByte);
++        char* bytes = (char*)P_MALLOC(PACKET_HEADER_LENGTH + numDataByte);
+         assert(bytes);
+         status = vector_pushBack(allocVectorPtr, (void*)bytes);
+         assert(status);
+@@ -181,7 +197,7 @@
+ 
+     bool_t status;
+     long lastNumDataByte = numDataByte + numByte % numPacket;
+-    char* bytes = (char*)malloc(PACKET_HEADER_LENGTH + lastNumDataByte);
++    char* bytes = (char*)P_MALLOC(PACKET_HEADER_LENGTH + lastNumDataByte);
+     assert(bytes);
+     status = vector_pushBack(allocVectorPtr, (void*)bytes);
+     assert(status);
+@@ -201,12 +217,22 @@
+  * -- Returns number of attacks generated
+  * =============================================================================
+  */
++#ifdef DISTRIDUTEDPACKET
++long
++stream_generate (stream_t* streamPtr,
++                 dictionary_t* dictionaryPtr,
++                 long numFlow,
++                 long seed,
++                 long maxLength,
++                 long NumThread)
++#else
+ long
+ stream_generate (stream_t* streamPtr,
+                  dictionary_t* dictionaryPtr,
+                  long numFlow,
+                  long seed,
+                  long maxLength)
++#endif
+ {
+     long numAttack = 0;
+ 
+@@ -215,6 +241,9 @@
+     vector_t* allocVectorPtr = streamPtr->allocVectorPtr;
+     queue_t*  packetQueuePtr = streamPtr->packetQueuePtr;
+     MAP_T*    attackMapPtr   = streamPtr->attackMapPtr;
++#ifdef DISTRIDUTEDPACKET
++    queue_t** packetQueues    =streamPtr->packetQueues;
++#endif   
+ 
+     detector_t* detectorPtr = detector_alloc();
+     assert(detectorPtr);
+@@ -241,7 +270,7 @@
+              * Create random string
+              */
+             long length = (random_generate(randomPtr) % maxLength) + 1;
+-            str = (char*)malloc((length + 1) * sizeof(char));
++            str = (char*)P_MALLOC((length + 1) * sizeof(char));
+             bool_t status = vector_pushBack(allocVectorPtr, (void*)str);
+             assert(status);
+             long l;
+@@ -249,7 +278,7 @@
+                 str[l] = ' ' + (char)(random_generate(randomPtr) % range);
+             }
+             str[l] = '\0';
+-            char* str2 = (char*)malloc((length + 1) * sizeof(char));
++            char* str2 = (char*)P_MALLOC((length + 1) * sizeof(char));
+             assert(str2);
+             strcpy(str2, str);
+             error_t error = detector_process(detectorPtr, str2); /* updates in-place */
+@@ -260,12 +289,19 @@
+                 assert(status);
+                 numAttack++;
+             }
+-            free(str2);
++            P_FREE(str2);
+         }
+         splitIntoPackets(str, f, randomPtr, allocVectorPtr, packetQueuePtr);
+     }
+-
+-    queue_shuffle(packetQueuePtr, randomPtr);
++#ifdef DISTRIDUTEDPACKET
++    long threadIndex = 0;
++    while (!queue_isEmpty(packetQueuePtr)) {
++        void* packet = queue_pop(packetQueuePtr);
++        queue_push(packetQueues[threadIndex], packet);
++        threadIndex = (threadIndex + 1) % NumThread;
++    }
++#endif
++    // queue_shuffle(packetQueuePtr, randomPtr);
+ 
+     detector_free(detectorPtr);
+ 
+@@ -278,23 +314,38 @@
+  * -- If none, returns NULL
+  * =============================================================================
+  */
++#ifdef DISTRIDUTEDPACKET
++char*
++stream_getPacket (stream_t* streamPtr,long threadId)
++{
++    return queue_pop(streamPtr->packetQueues[threadId]);
++}
++#else
+ char*
+ stream_getPacket (stream_t* streamPtr)
+ {
+     return queue_pop(streamPtr->packetQueuePtr);
+ }
+-
++#endif
+ 
+ /* =============================================================================
+  * TMstream_getPacket
+  * -- If none, returns NULL
+  * =============================================================================
+  */
++#ifdef DISTRIDUTEDPACKET
++char*
++TMstream_getPacket (TM_ARGDECL stream_t* streamPtr,long threadId)
++{
++    return (char*)TMQUEUE_POP(streamPtr->packetQueues[threadId]);
++}
++#else
+ char*
+ TMstream_getPacket (TM_ARGDECL stream_t* streamPtr)
+ {
+     return (char*)TMQUEUE_POP(streamPtr->packetQueuePtr);
+ }
++#endif
+ 
+ 
+ /* =============================================================================
+diff -ruN -X /tmp/exc master/stamp/intruder/stream.h pandora-supplement/intruder/stream.h
+--- master/stamp/intruder/stream.h	2014-11-29 12:36:52.000000000 +0900
++++ pandora-supplement/intruder/stream.h	2025-03-19 11:14:04.000000000 +0900
+@@ -99,12 +99,22 @@
+  * -- Returns number of attacks generated
+  * =============================================================================
+  */
++#ifdef DISTRIDUTEDPACKET
++long
++stream_generate (stream_t* streamPtr,
++                 dictionary_t* dictionaryPtr,
++                 long numFlow,
++                 long seed,
++                 long maxLength,
++                 long NumThread);
++#else
+ long
+ stream_generate (stream_t* streamPtr,
+                  dictionary_t* dictionaryPtr,
+                  long numFlow,
+                  long seed,
+                  long maxLength);
++#endif
+ 
+ 
+ /* =============================================================================
+@@ -112,8 +122,13 @@
+  * -- If none, returns NULL
+  * =============================================================================
+  */
++#ifdef DISTRIDUTEDPACKET
++char*
++stream_getPacket (stream_t* streamPtr,long threadId);
++#else
+ char*
+ stream_getPacket (stream_t* streamPtr);
++#endif
+ 
+ 
+ /* =============================================================================
+@@ -121,9 +136,13 @@
+  * -- If none, returns NULL
+  * =============================================================================
+  */
++#ifdef DISTRIDUTEDPACKET
++char*
++TMstream_getPacket (TM_ARGDECL stream_t* streamPtr,long threadId);
++#else
+ char*
+ TMstream_getPacket (TM_ARGDECL stream_t* streamPtr);
+-
++#endif
+ 
+ /* =============================================================================
+  * stream_isAttack
+@@ -132,9 +151,11 @@
+ bool_t
+ stream_isAttack (stream_t* streamPtr, long flowId);
+ 
+-
++#ifdef DISTRIDUTEDPACKET
++#define TMSTREAM_GETPACKET(s,r)           TMstream_getPacket(TM_ARG  s,r)
++#else
+ #define TMSTREAM_GETPACKET(s)           TMstream_getPacket(TM_ARG  s)
+-
++#endif
+ #endif /* STREAM_H */
+ 
+ 
