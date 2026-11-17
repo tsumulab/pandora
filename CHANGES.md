@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased
+## 1.1.0 (2026-11-17)
 
 - License: PANDORA's own code is now under the BSD-3-Clause-Clear license (`LICENSE`); bundled
   third-party components keep their own licenses (`NOTICE`). Version 1.0 was released under the
