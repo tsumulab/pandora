@@ -43,5 +43,6 @@
       "relation": "isSupplementTo",
       "scheme": "url"
     }
-  ]
+  ],
+  "dates": []
 }
