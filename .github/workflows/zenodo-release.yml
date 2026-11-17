@@ -28,13 +28,14 @@ jobs:
           name="pandora-${TAG#v}"
           git archive --format=tar.gz --prefix="${name}/" -o "${name}.tar.gz" "${TAG}"
           echo "archive=${name}.tar.gz" >> "$GITHUB_ENV"
+          echo "version=${TAG#v}" >> "$GITHUB_ENV"   # Zenodo version without the "v" (1.0, 1.1.0, ...)
 
       - name: Publish a new version on Zenodo
         # rseng/zenodo-release has no tagged releases; pin the reviewed commit.
         uses: rseng/zenodo-release@a9c88701a0176df755015f8ca4cf8cc754162f27
         with:
           token: ${{ secrets.ZENODO_TOKEN }}
-          version: ${{ github.event.release.tag_name }}
+          version: ${{ env.version }}
           zenodo_json: .zenodo.json
           html_url: ${{ github.event.release.html_url }}
           archive: ${{ env.archive }}
