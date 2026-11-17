@@ -1,11 +1,16 @@
-# Archive every published GitHub release as a new version of the existing
-# Zenodo record (concept DOI 10.5281/zenodo.23908116), so that the concept DOI
-# printed in the paper always resolves to the latest release.
+# Archive every published GitHub release as a new version of PANDORA's Zenodo
+# record (concept DOI 10.5281/zenodo.23908116), so that the concept DOI printed
+# in the paper resolves to the latest release.
 #
-# Requires the repository secret ZENODO_TOKEN: a Zenodo personal access token
-# with the deposit:write and deposit:actions scopes.
-# Do NOT also enable Zenodo's own GitHub integration for this repository, or
-# each release will be archived twice (the second time under a new concept DOI).
+# The new version inherits the previous one's metadata on Zenodo (authors,
+# ORCIDs, funding, license, description); edit those on Zenodo. The workflow
+# sends only the version, the date, the release link and the archive, and
+# leaves the version as a draft to be reviewed and published on Zenodo. Set the
+# repository variable ZENODO_AUTOPUBLISH to "true" to publish automatically.
+#
+# Requires the repository secret ZENODO_TOKEN: a Zenodo personal access token of
+# the record's owner, with the deposit:write and deposit:actions scopes.
+# Do NOT also enable Zenodo's own GitHub integration for this repository.
 name: Zenodo release
 
 on:
@@ -28,15 +33,13 @@ jobs:
           name="pandora-${TAG#v}"
           git archive --format=tar.gz --prefix="${name}/" -o "${name}.tar.gz" "${TAG}"
           echo "archive=${name}.tar.gz" >> "$GITHUB_ENV"
-          echo "version=${TAG#v}" >> "$GITHUB_ENV"   # Zenodo version without the "v" (1.0, 1.1.0, ...)
+          echo "version=${TAG#v}" >> "$GITHUB_ENV"
 
-      - name: Publish a new version on Zenodo
-        # rseng/zenodo-release has no tagged releases; pin the reviewed commit.
-        uses: rseng/zenodo-release@a9c88701a0176df755015f8ca4cf8cc754162f27
-        with:
-          token: ${{ secrets.ZENODO_TOKEN }}
-          version: ${{ env.version }}
-          zenodo_json: .zenodo.json
-          html_url: ${{ github.event.release.html_url }}
-          archive: ${{ env.archive }}
-          doi: '10.5281/zenodo.23908116'
+      - name: New version on Zenodo
+        env:
+          ZENODO_TOKEN: ${{ secrets.ZENODO_TOKEN }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          PUBLISH: ${{ vars.ZENODO_AUTOPUBLISH == 'true' && '--publish' || '' }}
+        run: |
+          python3 .github/scripts/zenodo_release.py "$archive" \
+            --version "$version" --release-url "$RELEASE_URL" $PUBLISH

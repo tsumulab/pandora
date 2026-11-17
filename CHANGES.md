@@ -1,5 +1,11 @@
 # Changes
 
+## Unreleased
+
+- Releases are archived on Zenodo through Zenodo's records API (`.github/scripts/zenodo_release.py`),
+  which keeps the metadata maintained on Zenodo (authors, funding, license); `.zenodo.json` is
+  no longer used and has been removed. New versions are left as drafts to be published on Zenodo.
+
 ## 1.1.0 (2026-11-17)
 
 - License: PANDORA's own code is now under the BSD-3-Clause-Clear license (`LICENSE`); bundled
